@@ -2,7 +2,7 @@ name: Check NKON Stock
 
 on:
   schedule:
-    - cron: '*/15 * * * *'   # кожні 15 хвилин
+    - cron: '3,18,33,48 * * * *'   # кожні 15 хвилин
   workflow_dispatch:          # можливість запускати вручну
 
 jobs:
