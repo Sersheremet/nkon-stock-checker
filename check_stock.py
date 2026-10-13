@@ -30,13 +30,17 @@ def load_cache():
         try:
             with open(CACHE_FILE, "r", encoding="utf-8") as f:
                 return json.load(f)
-        except:
+        except Exception as e:
+            print("Error loading cache:", e)
             return {}
     return {}
 
 def save_cache(cache):
-    with open(CACHE_FILE, "w", encoding="utf-8") as f:
-        json.dump(cache, f, ensure_ascii=False, indent=2)
+    try:
+        with open(CACHE_FILE, "w", encoding="utf-8") as f:
+            json.dump(cache, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print("Error saving cache:", e)
 
 def check_product(url):
     headers = {
@@ -48,6 +52,7 @@ def check_product(url):
         soup = BeautifulSoup(r.text, "html.parser")
         text = soup.get_text(" ", strip=True).lower()
 
+        # Зручні назви товарів
         if "deye-sun-12k" in url:
             name = "Deye SUN-12K (інвертор 12кВт)"
         elif "deye-se-f16" in url:
@@ -61,15 +66,16 @@ def check_product(url):
         pre_order = "pre order" in text or "estimated shipping date" in text
         add_to_cart = "add to cart" in text
 
+        # Точне визначення статусу
         if out_of_stock:
             state_key = "out_of_stock"
             status_text = "❌ Немає в наявності"
         elif pre_order:
             state_key = "pre_order"
             status_text = "🟡 Доступне попереднє замовлення (Pre-order)"
-        elif add_to_cart:
+        elif add_to_cart and not pre_order:
             state_key = "in_stock"
-            status_text = "✅ Є в наявності / можна замовити"
+            status_text = "✅ Є в наявності (відвантаження одразу)"
         else:
             state_key = "unknown"
             status_text = "⚠️ Невизначений статус"
@@ -108,9 +114,9 @@ def main():
         old_state = cache.get(url, None)
         new_state = res["state_key"]
 
-        print(f"  → Статус: {res['status_text']} (Минулий стан: {old_state}, Новий: {new_state})")
+        print(f"  → Статус: {res['status_text']} (Минулий: {old_state}, Новий: {new_state})")
 
-        # Якщо статус змінився порівняно з попереднім за這 (і це не перший запуск, де старого стану ще не було)
+        # Надсилаємо сповіщення лише при реальній зміні статусу (якщо це не перший запуск)
         if old_state is not None and old_state != new_state:
             changes.append({
                 "name": res["name"],
@@ -120,13 +126,13 @@ def main():
                 "status_text": res["status_text"]
             })
 
-        # Оновлюємо кеш
+        # Записуємо новий стан у кеш
         new_cache[url] = new_state
         time.sleep(1.5)
 
     save_cache(new_cache)
 
-    # Якщо є зміни — надсилаємо сповіщення
+    # Якщо відбулися зміни в статусах — надсилаємо в Telegram
     if changes:
         message = "🔄 <b>Зміна статусу товару на NKON!</b>\n\n"
         for item in changes:
