@@ -52,7 +52,7 @@ def check_product(url):
         soup = BeautifulSoup(r.text, "html.parser")
         text = soup.get_text(" ", strip=True).lower()
 
-        # Зручні назви товарів
+        # Зручні назви товарів та специфічна логіка для батареї з передзамовленням
         if "deye-sun-12k" in url:
             name = "Deye SUN-12K (інвертор 12кВт)"
         elif "deye-se-f16" in url:
@@ -63,17 +63,27 @@ def check_product(url):
             name = url
 
         out_of_stock = "out of stock" in text
-        pre_order = "pre order" in text or "estimated shipping date" in text
+        
+        # Перевірка на передзамовлення (шенемо ключові слова або наявність слова shipping/date)
+        pre_order = ("pre order" in text or 
+                     "pre-order" in text or 
+                     "shipping" in text or 
+                     "estimated" in text)
+
         add_to_cart = "add to cart" in text
 
-        # Точне визначення статусу
-        if out_of_stock:
+        # Спеціальне правило для нашої батареї: оскільки у неї завжди є дата і кнопка замовлення з очікуванням, 
+        # якщо немає повного "out of stock", для неї пріоритетним є статус пре-ордеру.
+        if "deye-se-f5-pro" in url and not out_of_stock:
+            state_key = "pre_order"
+            status_text = "🟡 Доступне попереднє замовлення (Pre-order)"
+        elif out_of_stock:
             state_key = "out_of_stock"
             status_text = "❌ Немає в наявності"
         elif pre_order:
             state_key = "pre_order"
             status_text = "🟡 Доступне попереднє замовлення (Pre-order)"
-        elif add_to_cart and not pre_order:
+        elif add_to_cart:
             state_key = "in_stock"
             status_text = "✅ Є в наявності (відвантаження одразу)"
         else:
@@ -116,7 +126,6 @@ def main():
 
         print(f"  → Статус: {res['status_text']} (Минулий: {old_state}, Новий: {new_state})")
 
-        # Надсилаємо сповіщення лише при реальній зміні статусу (якщо це не перший запуск)
         if old_state is not None and old_state != new_state:
             changes.append({
                 "name": res["name"],
@@ -126,13 +135,11 @@ def main():
                 "status_text": res["status_text"]
             })
 
-        # Записуємо новий стан у кеш
         new_cache[url] = new_state
         time.sleep(1.5)
 
     save_cache(new_cache)
 
-    # Якщо відбулися зміни в статусах — надсилаємо в Telegram
     if changes:
         message = "🔄 <b>Зміна статусу товару на NKON!</b>\n\n"
         for item in changes:
