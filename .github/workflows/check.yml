@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   repository_dispatch:
     types: [check_stock_trigger]
-
+# це коментар 
 jobs:
   check-stock:
     runs-on: ubuntu-latest
