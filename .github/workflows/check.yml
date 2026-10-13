@@ -1,0 +1,27 @@
+name: Check NKON Stock
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'   # кожні 15 хвилин
+  workflow_dispatch:          # можливість запускати вручну
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install requests beautifulsoup4
+
+      - name: Run stock checker
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        run: python check_stock.py
