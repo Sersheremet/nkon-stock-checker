@@ -1,37 +1,36 @@
 name: Check NKON Stock
 
 on:
-  schedule:
-    - cron: '3,18,33,48 * * * *'   # інтервалtimezone: 
-  workflow_dispatch:          # можливість запускати вручну
+  workflow_dispatch:
+  repository_dispatch:
+    types: [check_stock_trigger]
 
 jobs:
-  check:
+  check-stock:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write         # НАДЗВИЧАЙНО ВАЖЛИВО: дозволяє Actions писати в репозиторій
 
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.10'
 
       - name: Install dependencies
         run: |
+          python -m `pip install --upgrade pip`
           pip install requests beautifulsoup4
 
-      - name: Run stock checker
+      - name: Run script
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         run: python check_stock.py
 
-      - name: Commit and push status cache if changed
+      - name: Commit and push changes if status changed
         run: |
-          git config --global user.name "Stock Bot"
-          git config --global user.email "bot@users.noreply.github.com"
+          git config --global user.name "GitHub Action Bot"
+          git config --global user.email "action@github.com"
           git add status_cache.json
-          git diff --quiet && git diff --cached --quiet || (git commit -m "Update stock status cache [skip ci]" && git push)
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-update stock status cache [skip ci]" && git push)
