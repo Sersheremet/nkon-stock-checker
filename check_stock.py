@@ -1,10 +1,12 @@
 import os
+import json
 import requests
 from bs4 import BeautifulSoup
 import time
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CHAT_ID = "1063437372"
+CACHE_FILE = "status_cache.json"
 
 def send_telegram(message):
     if not TELEGRAM_BOT_TOKEN:
@@ -23,6 +25,19 @@ def send_telegram(message):
     except Exception as e:
         print("Telegram error:", e)
 
+def load_cache():
+    if os.path.exists(CACHE_FILE):
+        try:
+            with open(CACHE_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except:
+            return {}
+    return {}
+
+def save_cache(cache):
+    with open(CACHE_FILE, "w", encoding="utf-8") as f:
+        json.dump(cache, f, ensure_ascii=False, indent=2)
+
 def check_product(url):
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -33,7 +48,6 @@ def check_product(url):
         soup = BeautifulSoup(r.text, "html.parser")
         text = soup.get_text(" ", strip=True).lower()
 
-        # Назви для зручності
         if "deye-sun-12k" in url:
             name = "Deye SUN-12K (інвертор 12кВт)"
         elif "deye-se-f16" in url:
@@ -44,33 +58,34 @@ def check_product(url):
             name = url
 
         out_of_stock = "out of stock" in text
+        pre_order = "pre order" in text or "estimated shipping date" in text
         add_to_cart = "add to cart" in text
 
         if out_of_stock:
-            status = "❌ Немає в наявності"
-            available = False
+            state_key = "out_of_stock"
+            status_text = "❌ Немає в наявності"
+        elif pre_order:
+            state_key = "pre_order"
+            status_text = "🟡 Доступне попереднє замовлення (Pre-order)"
         elif add_to_cart:
-            status = "✅ Є в наявності / можна замовити"
-            available = True
+            state_key = "in_stock"
+            status_text = "✅ Є в наявності / можна замовити"
         else:
-            status = "⚠️ Невизначений статус"
-            available = False
+            state_key = "unknown"
+            status_text = "⚠️ Невизначений статус"
 
         return {
             "name": name,
             "url": url,
-            "status": status,
-            "available": available,
-            "out_of_stock": out_of_stock,
-            "add_to_cart": add_to_cart
+            "state_key": state_key,
+            "status_text": status_text
         }
     except Exception as e:
         return {
             "name": url,
             "url": url,
-            "status": f"Помилка перевірки: {e}",
-            "available": False,
-            "error": True
+            "state_key": "error",
+            "status_text": f"Помилка перевірки: {e}"
         }
 
 def main():
@@ -81,29 +96,44 @@ def main():
     with open("products.txt", "r", encoding="utf-8") as f:
         urls = [line.strip() for line in f if line.strip() and not line.startswith("#")]
 
+    cache = load_cache()
+    new_cache = cache.copy()
+    changes = []
+
     print(f"Checking {len(urls)} products...")
-    results = []
-    newly_available = []
 
     for url in urls:
         print(f"Checking: {url}")
-        result = check_product(url)
-        results.append(result)
-        print(f"  → {result['status']}")
-        time.sleep(1.5)  # невелика пауза між запитами
+        res = check_product(url)
+        old_state = cache.get(url, None)
+        new_state = res["state_key"]
 
-        if result.get("available"):
-            newly_available.append(result)
+        print(f"  → Статус: {res['status_text']} (Минулий стан: {old_state}, Новий: {new_state})")
 
-    # Формуємо повідомлення
-    if newly_available:
-        message = "🔔 <b>Товар з'явився в наявності!</b>\n\n"
-        for item in newly_available:
-            message += f"<b>{item['name']}</b>\n{item['status']}\n{item['url']}\n\n"
+        # Якщо статус змінився порівняно з попереднім за這 (і це не перший запуск, де старого стану ще не було)
+        if old_state is not None and old_state != new_state:
+            changes.append({
+                "name": res["name"],
+                "url": url,
+                "old_state": old_state,
+                "new_state": new_state,
+                "status_text": res["status_text"]
+            })
+
+        # Оновлюємо кеш
+        new_cache[url] = new_state
+        time.sleep(1.5)
+
+    save_cache(new_cache)
+
+    # Якщо є зміни — надсилаємо сповіщення
+    if changes:
+        message = "🔄 <b>Зміна статусу товару на NKON!</b>\n\n"
+        for item in changes:
+            message += f"<b>{item['name']}</b>\nНовий статус: {item['status_text']}\n{item['url']}\n\n"
         send_telegram(message)
     else:
-        # Можна закоментувати, якщо не хочеш отримувати повідомлення "все ще немає"
-        print("Нічого нового не з'явилося")
+        print("Змін статусів не виявлено.")
 
 if __name__ == "__main__":
     main()
