@@ -8,6 +8,9 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write         # НАДЗВИЧАЙНО ВАЖЛИВО: дозволяє Actions писати в репозиторій
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -25,3 +28,10 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         run: python check_stock.py
+
+      - name: Commit and push status cache if changed
+        run: |
+          git config --global user.name "Stock Bot"
+          git config --global user.email "bot@users.noreply.github.com"
+          git add status_cache.json
+          git diff --quiet && git diff --cached --quiet || (git commit -m "Update stock status cache [skip ci]" && git push)
