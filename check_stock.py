@@ -64,7 +64,6 @@ def check_product(url):
 
         out_of_stock = "out of stock" in text
         
-        # Перевірка на передзамовлення (шенемо ключові слова або наявність слова shipping/date)
         pre_order = ("pre order" in text or 
                      "pre-order" in text or 
                      "shipping" in text or 
@@ -72,8 +71,6 @@ def check_product(url):
 
         add_to_cart = "add to cart" in text
 
-        # Спеціальне правило для нашої батареї: оскільки у неї завжди є дата і кнопка замовлення з очікуванням, 
-        # якщо немає повного "out of stock", для неї пріоритетним є статус пре-ордеру.
         if "deye-se-f5-pro" in url and not out_of_stock:
             state_key = "pre_order"
             status_text = "🟡 Доступне попереднє замовлення (Pre-order)"
@@ -126,6 +123,7 @@ def main():
 
         print(f"  → Статус: {res['status_text']} (Минулий: {old_state}, Новий: {new_state})")
 
+        # Головне покращення: перевіряємо зміну ТІЛЬКИ якщо товар вже був у кеші
         if old_state is not None and old_state != new_state:
             changes.append({
                 "name": res["name"],
@@ -134,6 +132,8 @@ def main():
                 "new_state": new_state,
                 "status_text": res["status_text"]
             })
+        elif old_state is None:
+            print(f"  ℹ️ Первинне збереження в кеш для нової позиції (без сповіщення).")
 
         new_cache[url] = new_state
         time.sleep(1.5)
