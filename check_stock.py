@@ -1,3 +1,4 @@
+
 import os
 import re
 import json
@@ -7,8 +8,11 @@ import requests
 
 from datetime import datetime
 from bs4 import BeautifulSoup
-from requests.exceptions import RequestException
 
+
+# ============================================================
+# НАЛАШТУВАННЯ
+# ============================================================
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CHAT_ID = "1063437372"
@@ -17,25 +21,9 @@ CACHE_FILE = "status_cache.json"
 PRODUCTS_FILE = "products.txt"
 
 REQUEST_TIMEOUT = 20
-RETRIES = 2
+REQUEST_RETRIES = 2
 REQUEST_DELAY = 1.5
 TELEGRAM_MAX_LENGTH = 3500
-
-
-# Назви товарів для повідомлень Telegram
-PRODUCT_NAMES = {
-    "deye-sun-12k": "Deye SUN-12K (інвертор 12кВт)",
-    "deye-se-f16": "Deye SE-F16-C (16 кВт·год батарея)",
-    "deye-se-f5-pro": "Deye SE-F5 Pro-C (5.12 кВт·год)",
-}
-
-
-STATUS_TEXTS = {
-    "in_stock": "✅ Є в наявності (відвантаження одразу)",
-    "pre_order": "🟡 Доступне попереднє замовлення (Pre-order)",
-    "out_of_stock": "❌ Немає в наявності",
-}
-
 
 HEADERS = {
     "User-Agent": (
@@ -45,22 +33,39 @@ HEADERS = {
     )
 }
 
+PRODUCT_NAMES = {
+    "deye-sun-12k": "Deye SUN-12K (інвертор 12 кВт)",
+    "deye-se-f16": "Deye SE-F16-C (батарея 16 кВт·год)",
+    "deye-se-f5-pro": "Deye SE-F5 Pro-C (батарея 5.12 кВт·год)",
+    "deye-sun-8k": "Deye SUN-8K (інвертор 8 кВт)",
+    "deye-sun-5k": "Deye SUN-5K (інвертор 5 кВт)",
+    "deye-sun-6k": "Deye SUN-6K (інвертор 6 кВт)",
+    "deye-se-f12": "Deye SE-F12-C (батарея)",
+    "sun-5k-sg06": "Deye SUN-5K SG06 (інвертор 5 кВт)",
+}
+
+
+# ============================================================
+# НАЗВА ТОВАРУ
+# ============================================================
 
 def get_product_name(url):
-    """Повертає зрозумілу назву товару."""
     url_lower = url.lower()
 
-    for product_key, name in PRODUCT_NAMES.items():
-        if product_key in url_lower:
+    for key, name in PRODUCT_NAMES.items():
+        if key in url_lower:
             return name
 
     return url
 
 
+# ============================================================
+# TELEGRAM
+# ============================================================
+
 def send_telegram(message):
-    """Надсилає повідомлення в Telegram і перевіряє відповідь API."""
     if not TELEGRAM_BOT_TOKEN:
-        print("Помилка: змінна TELEGRAM_BOT_TOKEN не задана.")
+        print("⚠️ Не задано секрет TELEGRAM_BOT_TOKEN.")
         return False
 
     api_url = (
@@ -72,7 +77,7 @@ def send_telegram(message):
         "chat_id": CHAT_ID,
         "text": message,
         "parse_mode": "HTML",
-        "disable_web_page_preview": False,
+        "disable_web_page_preview": True,
     }
 
     try:
@@ -86,70 +91,65 @@ def send_telegram(message):
         result = response.json()
 
         if not result.get("ok"):
-            print("Помилка Telegram API:", result)
+            print("⚠️ Telegram повернув помилку:", result)
             return False
 
-        print("Telegram: повідомлення успішно прийнято API.")
+        print("✅ Повідомлення Telegram надіслано.")
         return True
 
-    except (RequestException, ValueError) as error:
-        print("Помилка надсилання в Telegram:", error)
+    except Exception as error:
+        print(f"❌ Помилка Telegram: {error}")
         return False
 
 
+# ============================================================
+# КЕШ
+# Підтримує як старий формат, так і новий:
+# "URL": "in_stock"
+# "URL": {"state": "pre_order", "date": "06-11-2026"}
+# ============================================================
+
 def load_cache():
-    """
-    Читає як старий кеш (URL -> рядок статусу),
-    так і новий (URL -> об'єкт зі статусом та датою).
-    """
     if not os.path.exists(CACHE_FILE):
+        print("ℹ️ Кеш ще не існує. Буде створено новий.")
         return {}
 
     try:
         with open(CACHE_FILE, "r", encoding="utf-8") as file:
-            data = json.load(file)
+            raw_cache = json.load(file)
 
-        if not isinstance(data, dict):
-            print("Помилка: формат кешу невідомий. Кеш не використано.")
+        if not isinstance(raw_cache, dict):
+            print("⚠️ Невідомий формат кешу. Починаємо з порожнього.")
             return {}
 
         cache = {}
 
-        for url, value in data.items():
+        for url, value in raw_cache.items():
             if isinstance(value, str):
-                # Старий формат:
-                # "URL": "in_stock"
                 cache[url] = {
                     "state": value,
                     "date": None,
                 }
 
             elif isinstance(value, dict):
-                # Новий формат:
-                # "URL": {"state": "pre_order", "date": "06-11-2026"}
-                state = value.get("state")
-                date = value.get("date")
+                cache[url] = {
+                    "state": value.get("state"),
+                    "date": value.get("date"),
+                }
 
-                if isinstance(state, str):
-                    cache[url] = {
-                        "state": state,
-                        "date": date if isinstance(date, str) else None,
-                    }
-
-        print(f"Завантажено товарів із кешу: {len(cache)}")
+        print(f"📂 Завантажено записів кешу: {len(cache)}")
         return cache
 
-    except (OSError, json.JSONDecodeError) as error:
-        print("Помилка читання кешу:", error)
+    except Exception as error:
+        print(f"❌ Помилка читання кешу: {error}")
         return {}
 
 
 def save_cache(cache):
-    """Зберігає кеш атомарно, щоб зменшити ризик пошкодження файлу."""
-    temp_file = CACHE_FILE + ".tmp"
+    temporary_file = CACHE_FILE + ".tmp"
 
     try:
-        with open(temp_file, "w", encoding="utf-8") as file:
+        with open(temporary_file, "w", encoding="utf-8") as file:
             json.dump(
                 cache,
                 file,
@@ -157,147 +157,137 @@ def save_cache(cache):
                 indent=2,
             )
 
-        os.replace(temp_file, CACHE_FILE)
-        print("Кеш збережено.")
+        os.replace(temporary_file, CACHE_FILE)
+        print("💾 Кеш збережено.")
 
-    except OSError as error:
-        print("Помилка збереження кешу:", error)
+    except Exception as error:
+        print(f"❌ Помилка збереження кешу: {error}")
 
-        try:
-            if os.path.exists(temp_file):
-                os.remove(temp_file)
-        except OSError:
-            pass
 
+# ============================================================
+# ВИТЯГУВАННЯ ДАТИ ВІДВАНТАЖЕННЯ
+# Приклад на сайті: Estimated shipping date: 06-11-2026
+# ============================================================
 
 def extract_preorder_date(soup):
-    """
-    Витягує дату з елемента:
-    <span class="ampreorder-observed">
-        Estimated shipping date: 06-11-2026
-    </span>
+    element = soup.select_one(".ampreorder-observed")
 
-    Повертає дату у форматі DD-MM-YYYY або None.
-    """
-    date_element = soup.select_one(".ampreorder-observed")
+    if element:
+        text = element.get_text(" ", strip=True)
+        match = re.search(
+            r"(\d{2})-(\d{2})-(\d{4})",
+            text,
+        )
 
-    if not date_element:
-        return None
+        if match:
+            date_text = match.group(0)
 
-    text = date_element.get_text(" ", strip=True)
+            try:
+                datetime.strptime(date_text, "%d-%m-%Y")
+                print(f"  📅 Знайдено дату відвантаження: {date_text}")
+                return date_text
 
-    match = re.search(
-        r"(\d{2})-(\d{2})-(\d{4})",
-        text,
-    )
+            except ValueError:
+                print(f"  ⚠️ Некоректна дата: {date_text}")
 
-    if not match:
-        print(f"Не вдалося розпізнати дату передзамовлення: {text}")
-        return None
+        else:
+            print(f"  ℹ️ Елемент дати знайдено, але дати в ньому немає: {text}")
 
-    date_text = match.group(0)
+    else:
+        print("  ℹ️ Елемент .ampreorder-observed у HTML не знайдено.")
 
-    try:
-        datetime.strptime(date_text, "%d-%m-%Y")
-        return date_text
-    except ValueError:
-        print(f"Некоректна дата передзамовлення: {date_text}")
-        return None
+    # Запасний пошук дати в тексті сторінки.
+    # Використовується лише якщо є згадка про shipping date.
+    page_text = soup.get_text(" ", strip=True)
 
+    if re.search(r"estimated\s+shipping\s+date", page_text, re.I):
+        match = re.search(
+            r"estimated\s+shipping\s+date\s*:\s*"
+            r"(\d{2}-\d{2}-\d{4})",
+            page_text,
+            re.I,
+        )
+
+        if match:
+            date_text = match.group(1)
+
+            try:
+                datetime.strptime(date_text, "%d-%m-%Y")
+                print(f"  📅 Дату знайдено запасним способом: {date_text}")
+                return date_text
+            except ValueError:
+                pass
+
+    return None
+
+
+# ============================================================
+# ВИЗНАЧЕННЯ СТАТУСУ ТОВАРУ
+# ============================================================
 
 def detect_product_status(soup, url):
-    """
-    Визначає статус за конкретними елементами HTML NKON.
-
-    Повертає:
-        state_key: in_stock / pre_order / out_of_stock / unknown
-        preorder_date: дата або None
-    """
-    stock_element = soup.select_one(".product-info-stock-sku .stock")
-    stock_text = (
-        stock_element.get_text(" ", strip=True).lower()
-        if stock_element
-        else ""
-    )
-
-    stock_classes = (
-        stock_element.get("class", [])
-        if stock_element
-        else []
-    )
-
+    stock = soup.select_one(".product-info-stock-sku .stock")
     button = soup.select_one("#product-addtocart-button")
+    notify_link = soup.select_one(
+        ".product.alert.stock a.action.alert"
+    )
+    preorder_message = soup.select_one(".preorder-message-block")
+
+    stock_text = (
+        stock.get_text(" ", strip=True).lower()
+        if stock else ""
+    )
+    stock_classes = stock.get("class", []) if stock else []
+
     button_text = (
         button.get_text(" ", strip=True).lower()
-        if button
-        else ""
-    )
-
-    notify_button = soup.select_one(
-        ".product.alert.stock a.action.alert"
+        if button else ""
     )
 
     preorder_date = extract_preorder_date(soup)
 
-    # Ознаки передзамовлення
-    preorder_message = soup.select_one(".preorder-message-block")
-
-    is_preorder = (
-        preorder_date is not None
-        or "pre order" in button_text
-        or "pre-order" in button_text
-        or preorder_message is not None
-    )
-
-    # 1. Явний статус відсутності товару
+    # 1. Немає в наявності
     if (
         "unavailable" in stock_classes
         or "out of stock" in stock_text
     ):
         return "out_of_stock", None
 
-    # 2. Передзамовлення має пріоритет над загальним
-    # класом stock available, оскільки NKON використовує
-    # цей клас і для товарів, які ще їдуть зі складу постачальника.
-    if is_preorder:
+    # 2. Попереднє замовлення
+    if (
+        preorder_date is not None
+        or "pre order" in button_text
+        or "pre-order" in button_text
+        or preorder_message is not None
+    ):
         return "pre_order", preorder_date
 
-    # 3. Товар реально доступний для звичайної покупки
+    # 3. Є в наявності
     if (
         "available" in stock_classes
-        and "in stock" in stock_text
-        and "pre order" not in button_text
+        and (
+            "in stock" in stock_text
+            or "add to cart" in button_text
+        )
     ):
         return "in_stock", None
 
-    # 4. Додаткова ознака відсутності
-    if notify_button:
+    # 4. Альтернативна ознака відсутності товару
+    if notify_link is not None:
         return "out_of_stock", None
 
-    # 5. Збереження старого спеціального правила для SE-F5 Pro-C:
-    # використовуємо його лише тоді, коли сторінка схожа на
-    # сторінку товару, але статус не вдалося визначити.
-    # Явні статуси вище завжди мають пріоритет.
-    if (
-        "deye-se-f5-pro" in url.lower()
-        and soup.select_one(".price-box")
-        and soup.select_one("#product_addtocart_form")
-    ):
-        print(
-            "Увага: для SE-F5 Pro-C застосовано "
-            "резервне правило передзамовлення."
-        )
-        return "pre_order", preorder_date
-
-    # Незнайомий HTML: не вважаємо це зміною статусу
+    print("  ⚠️ Не вдалося достовірно визначити статус товару.")
     return "unknown", None
 
 
+# ============================================================
+# ПЕРЕВІРКА ОДНОГО ТОВАРУ
+# ============================================================
+
 def check_product(url):
-    """Завантажує сторінку й визначає статус товару."""
     name = get_product_name(url)
 
-    for attempt in range(1, RETRIES + 2):
+    for attempt in range(REQUEST_RETRIES + 1):
         try:
             response = requests.get(
                 url,
@@ -308,249 +298,253 @@ def check_product(url):
 
             soup = BeautifulSoup(response.text, "html.parser")
 
-            # Захист від сторінок помилок, заглушок та
-            # HTML, який не схожий на сторінку товару.
+            # Переконуємося, що завантажено сторінку товару,
+            # а не сторінку помилки чи блокування.
             if not soup.select_one(".product-info-price"):
                 raise ValueError(
-                    "Не знайдено блок .product-info-price. "
-                    "Можливо, сайт повернув заглушку або змінив HTML."
+                    "У відповіді не знайдено блок .product-info-price. "
+                    "Можливо, сайт повернув іншу сторінку."
                 )
 
-            state_key, preorder_date = detect_product_status(
-                soup,
-                url,
-            )
+            state, date = detect_product_status(soup, url)
 
-            if state_key == "unknown":
-                print(
-                    f"Не вдалося визначити статус товару: {url}"
-                )
+            if state == "unknown":
+                print(f"  ⚠️ Статус невідомий для {url}")
                 return {
                     "success": False,
                     "name": name,
                     "url": url,
-                    "state_key": "unknown",
-                    "status_text": "⚠️ Невизначений статус",
+                    "state": "unknown",
                     "date": None,
                 }
 
-            status_text = STATUS_TEXTS[state_key]
+            status_texts = {
+                "in_stock": "✅ Є в наявності",
+                "out_of_stock": "❌ Немає в наявності",
+                "pre_order": "🟡 Попереднє замовлення",
+            }
 
-            print(
-                f"Визначено: {status_text}"
-                + (
-                    f"; дата: {preorder_date}"
-                    if preorder_date
-                    else ""
-                )
-            )
+            status_text = status_texts[state]
+
+            if state == "pre_order" and date:
+                status_text += f" (очікувана дата: {date})"
+
+            print(f"  → {status_text}")
 
             return {
                 "success": True,
                 "name": name,
                 "url": url,
-                "state_key": state_key,
+                "state": state,
+                "date": date,
                 "status_text": status_text,
-                "date": preorder_date,
             }
 
-        except (RequestException, ValueError) as error:
+        except Exception as error:
             print(
-                f"Помилка перевірки {url} "
-                f"(спроба {attempt}/{RETRIES + 1}): {error}"
+                f"  ⚠️ Спроба {attempt + 1}/"
+                f"{REQUEST_RETRIES + 1} не вдалася: {error}"
             )
 
-            if attempt <= RETRIES:
-                time.sleep(2 * attempt)
+            if attempt < REQUEST_RETRIES:
+                time.sleep(2)
 
-        except Exception as error:
-            # Несподівані помилки також не повинні
-            # змінювати кеш товару.
-            print(f"Непередбачена помилка для {url}: {error}")
-            break
+    print("  ❌ Не вдалося перевірити товар. Кеш не оновлюємо.")
 
     return {
         "success": False,
         "name": name,
         "url": url,
-        "state_key": "error",
-        "status_text": "⚠️ Помилка перевірки",
+        "state": "error",
         "date": None,
     }
 
 
-def format_change_message(changes):
-    """Формує HTML-повідомлення для Telegram."""
-    message = "🔄 <b>Зміна статусу товару на NKON!</b>\n\n"
+# ============================================================
+# ФОРМУВАННЯ TELEGRAM-ПОВІДОМЛЕНЬ
+# ============================================================
 
-    for item in changes:
-        name = html.escape(item["name"])
-        url = html.escape(item["url"], quote=True)
+def format_change_message(item):
+    name = html.escape(item["name"])
+    url = html.escape(item["url"], quote=True)
 
-        message += f"<b>{name}</b>\n"
-        message += f"Новий статус: {item['status_text']}\n"
+    lines = [
+        f"<b>{name}</b>",
+        f"Новий статус: {item['status_text']}",
+    ]
 
-        if (
-            item["new_state"] == "pre_order"
-            and item.get("new_date")
-        ):
-            formatted_date = datetime.strptime(
-                item["new_date"],
-                "%d-%m-%Y",
-            ).strftime("%d.%m.%Y")
+    if item.get("date"):
+        lines.append(
+            f"📅 Очікувана дата відвантаження: "
+            f"<b>{html.escape(item['date'])}</b>"
+        )
 
-            message += (
-                f"📅 Очікувана дата відвантаження: "
-                f"{formatted_date}\n"
-            )
+    lines.append(url)
 
-        message += f"{url}\n\n"
-
-    return message
+    return "\n".join(lines)
 
 
 def send_changes_in_chunks(changes):
-    """Надсилає повідомлення частинами, якщо змін багато."""
-    chunk = []
+    if not changes:
+        return
 
-    for change in changes:
-        candidate = chunk + [change]
-        message = format_change_message(candidate)
+    heading = "🔄 <b>Зміни на NKON</b>\n\n"
+    current_message = heading
 
-        if len(message) > TELEGRAM_MAX_LENGTH and chunk:
-            send_telegram(format_change_message(chunk))
-            chunk = [change]
-        else:
-            chunk = candidate
+    for item in changes:
+        block = format_change_message(item) + "\n\n"
 
-    if chunk:
-        send_telegram(format_change_message(chunk))
+        if (
+            len(current_message) + len(block) > TELEGRAM_MAX_LENGTH
+            and current_message != heading
+        ):
+            send_telegram(current_message.strip())
+            current_message = heading
 
+        current_message += block
+
+    if current_message.strip() != heading.strip():
+        send_telegram(current_message.strip())
+
+
+# ============================================================
+# ОСНОВНА ПРОГРАМА
+# ============================================================
 
 def main():
     if not os.path.exists(PRODUCTS_FILE):
-        print(f"{PRODUCTS_FILE} не знайдено.")
+        print(f"❌ Файл {PRODUCTS_FILE} не знайдено.")
         return
 
     with open(PRODUCTS_FILE, "r", encoding="utf-8") as file:
-        urls = [
-            line.strip()
-            for line in file
-            if line.strip()
-            and not line.strip().startswith("#")
-        ]
+        urls = []
 
-    # Прибираємо дублікати, зберігаючи початковий порядок
-    urls = list(dict.fromkeys(urls))
+        for line in file:
+            url = line.strip()
+
+            if not url or url.startswith("#"):
+                continue
+
+            if url not in urls:
+                urls.append(url)
 
     if not urls:
-        print("У products.txt немає URL для перевірки.")
+        print("⚠️ У products.txt немає URL для перевірки.")
         return
 
     cache = load_cache()
     new_cache = cache.copy()
     changes = []
 
-    print(f"Перевіряємо товарів: {len(urls)}")
+    print(f"\n🔎 Перевіряємо товарів: {len(urls)}\n")
 
     for url in urls:
-        print(f"\nПеревірка: {url}")
+        print(f"Перевірка: {url}")
 
         try:
             result = check_product(url)
 
+            # Не оновлюємо кеш, якщо перевірка не вдалася.
             if not result["success"]:
-                print("Кеш для цього товару не змінюємо.")
                 continue
 
             old_record = cache.get(url)
-            new_state = result["state_key"]
+
+            # Перший запис товару — без повідомлення.
+            if old_record is None:
+                print("  ℹ️ Перший запис у кеш — без сповіщення.")
+                new_cache[url] = {
+                    "state": result["state"],
+                    "date": result["date"],
+                }
+                continue
+
+            old_state = old_record.get("state")
+            old_date = old_record.get("date")
+
+            new_state = result["state"]
             new_date = result["date"]
 
-            if old_record is None:
+            state_changed = (
+                old_state is not None
+                and old_state != new_state
+            )
+
+            date_changed = (
+                new_state == "pre_order"
+                and old_state == "pre_order"
+                and old_date is not None
+                and new_date is not None
+                and old_date != new_date
+            )
+
+            # Зберігаємо раніше відому дату, якщо сторінка
+            # тимчасово не повернула дату для pre-order.
+            if (
+                new_state == "pre_order"
+                and new_date is None
+                and old_state == "pre_order"
+                and old_date is not None
+            ):
+                new_date = old_date
                 print(
-                    "Перший запис товару в кеш. "
-                    "Сповіщення не надсилаємо."
+                    "  ℹ️ Нову дату не отримано; "
+                    f"залишаємо попередню: {old_date}"
                 )
 
+            if state_changed:
+                print(
+                    f"  🔄 Статус змінився: "
+                    f"{old_state} → {new_state}"
+                )
+
+                changes.append({
+                    "name": result["name"],
+                    "url": url,
+                    "status_text": result["status_text"],
+                    "date": new_date,
+                })
+
+            elif date_changed:
+                print(
+                    f"  📅 Дата змінилася: "
+                    f"{old_date} → {new_date}"
+                )
+
+                changes.append({
+                    "name": result["name"],
+                    "url": url,
+                    "status_text": (
+                        "📅 Змінилася очікувана дата відвантаження"
+                    ),
+                    "date": new_date,
+                })
+
             else:
-                old_state = old_record.get("state")
-                old_date = old_record.get("date")
+                print("  ✓ Змін статусу або дати не виявлено.")
 
-                # Невідомий статус зі старого кешу не вважаємо
-                # достовірним станом для сповіщення.
-                if old_state not in STATUS_TEXTS:
-                    print(
-                        "Старий статус не є достовірним; "
-                        "оновлюємо кеш без сповіщення."
-                    )
-
-                elif old_state != new_state:
-                    changes.append({
-                        "name": result["name"],
-                        "url": url,
-                        "old_state": old_state,
-                        "new_state": new_state,
-                        "status_text": result["status_text"],
-                        "new_date": new_date,
-                    })
-
-                elif (
-                    new_state == "pre_order"
-                    and old_date
-                    and new_date
-                    and old_date != new_date
-                ):
-                    # Статус не змінився, але змінилася дата
-                    # очікуваного відвантаження.
-                    changes.append({
-                        "name": result["name"],
-                        "url": url,
-                        "old_state": old_state,
-                        "new_state": new_state,
-                        "status_text": (
-                            "📅 Змінилася очікувана дата "
-                            "відвантаження"
-                        ),
-                        "new_date": new_date,
-                    })
-
-                elif (
-                    new_state == "pre_order"
-                    and old_date
-                    and not new_date
-                ):
-                    # Не стираємо вже відому дату через те,
-                    # що сайт тимчасово перестав її показувати.
-                    print(
-                        "Дата передзамовлення зараз відсутня; "
-                        "зберігаємо попередню дату."
-                    )
-
-                    new_date = old_date
-
-            # Зберігаємо новий формат кешу.
             new_cache[url] = {
                 "state": new_state,
                 "date": new_date,
             }
 
-            print(
-                f"Статус: {result['status_text']}; "
-                f"дата: {new_date or 'не вказана'}"
-            )
+        except Exception as error:
+            print(f"  ❌ Неочікувана помилка: {error}")
+            print("  Кеш цього товару не оновлюємо.")
 
         finally:
-            # Затримка між товарами навіть після помилки
             time.sleep(REQUEST_DELAY)
 
+    # Зберігаємо кеш до надсилання повідомлень.
     save_cache(new_cache)
 
     if changes:
-        print(f"\nВиявлено змін: {len(changes)}")
+        print(f"\n📨 Змін виявлено: {len(changes)}")
         send_changes_in_chunks(changes)
     else:
-        print("\nЗмін статусів не виявлено.")
+        print("\n✓ Змін статусів або дат не виявлено.")
+
+    print("\nГотово.")
 
 
 if __name__ == "__main__":
