@@ -167,52 +167,35 @@ def save_cache(cache):
 # Приклад: Estimated shipping date: 06-11-2026
 # ============================================================
 
+
 def extract_preorder_date(soup, raw_html=""):
+    # Шукаємо дату в елементі, який використовує сайт
     element = soup.select_one(".ampreorder-observed")
 
     if element:
         text = element.get_text(" ", strip=True)
-        print(f"  DEBUG: .ampreorder-observed: {text}")
-    else:
-        text = ""
-        print("  DEBUG: .ampreorder-observed у HTML не знайдено.")
+        match = re.search(r"\b\d{2}-\d{2}-\d{4}\b", text)
+        if match:
+            date = match.group(0)
+            print(f"  DEBUG: Дату знайдено в елементі: {date}")
+            return date
 
-    # Спочатку шукаємо дату в спеціальному елементі.
-    match = re.search(r"\b(\d{2}-\d{2}-\d{4})\b", text)
+    # Якщо елемента немає, шукаємо дату в HTML
+    # лише за наявності ознаки передзамовлення
+    if raw_html and re.search(
+        r"This product is for pre-order|Estimated shipping date",
+        raw_html,
+        re.IGNORECASE
+    ):
+        dates = re.findall(r"\b\d{2}-\d{2}-\d{4}\b", raw_html)
 
-    # Якщо елемента немає або в ньому немає дати,
-    # шукаємо її в усьому HTML-відгуку сервера.
-    if not match and raw_html:
-        match = re.search(
-            r"estimated\s+shipping\s+date\s*:\s*"
-            r"(\d{2}-\d{2}-\d{4})",
-            raw_html,
-            re.IGNORECASE,
-        )
+        if dates:
+            date = dates[0]
+            print(f"  DEBUG: Дату передзамовлення знайдено в HTML: {date}")
+            return date
 
-    # Додаткова перевірка видимого тексту HTML.
-    if not match:
-        page_text = soup.get_text(" ", strip=True)
-        match = re.search(
-            r"estimated\s+shipping\s+date\s*:\s*"
-            r"(\d{2}-\d{2}-\d{4})",
-            page_text,
-            re.IGNORECASE,
-        )
-
-    if not match:
-        print("  DEBUG: Дату відвантаження у відповіді сервера не знайдено.")
-        return None
-
-    date_text = match.group(1)
-
-    try:
-        datetime.strptime(date_text, "%d-%m-%Y")
-        print(f"  📅 Знайдено дату відвантаження: {date_text}")
-        return date_text
-    except ValueError:
-        print(f"  ⚠️ Некоректна дата: {date_text}")
-        return None
+    print("  DEBUG: Дату передзамовлення не знайдено.")
+    return None
 
 
 # ============================================================
