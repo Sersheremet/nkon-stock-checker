@@ -87,6 +87,13 @@ def send_telegram(message):
             timeout=15,
         )
         response.raise_for_status()
+        print("DEBUG: amp preorder element:", "ampreorder-observed" in response.text)
+print("DEBUG: shipping date text:", "Estimated shipping date" in response.text)
+print("DEBUG: preorder text:", "This product is for pre-order" in response.text)
+print(
+    "DEBUG: знайдені дати:",
+    re.findall(r"\d{2}-\d{2}-\d{4}", response.text)[:10]
+)
 
         result = response.json()
 
