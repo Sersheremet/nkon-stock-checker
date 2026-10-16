@@ -6,7 +6,6 @@ import time
 import html
 import requests
 
-from datetime import datetime
 from bs4 import BeautifulSoup
 
 
@@ -164,34 +163,38 @@ def save_cache(cache):
 
 # ============================================================
 # ПОШУК ДАТИ ВІДВАНТАЖЕННЯ
-# Приклад: Estimated shipping date: 06-11-2026
 # ============================================================
 
-
 def extract_preorder_date(soup, raw_html=""):
-    # Шукаємо дату в елементі, який використовує сайт
     element = soup.select_one(".ampreorder-observed")
 
     if element:
         text = element.get_text(" ", strip=True)
         match = re.search(r"\b\d{2}-\d{2}-\d{4}\b", text)
+
         if match:
             date = match.group(0)
             print(f"  DEBUG: Дату знайдено в елементі: {date}")
             return date
 
-    # Якщо елемента немає, шукаємо дату в HTML
-    # лише за наявності ознаки передзамовлення
+    # Резервний пошук дати в HTML сторінки.
+    # Використовуємо його лише за наявності ознаки передзамовлення.
     if raw_html and re.search(
         r"This product is for pre-order|Estimated shipping date",
         raw_html,
-        re.IGNORECASE
+        re.IGNORECASE,
     ):
-        dates = re.findall(r"\b\d{2}-\d{2}-\d{4}\b", raw_html)
+        dates = re.findall(
+            r"\b\d{2}-\d{2}-\d{4}\b",
+            raw_html,
+        )
 
         if dates:
             date = dates[0]
-            print(f"  DEBUG: Дату передзамовлення знайдено в HTML: {date}")
+            print(
+                f"  DEBUG: Дату передзамовлення "
+                f"знайдено в HTML: {date}"
+            )
             return date
 
     print("  DEBUG: Дату передзамовлення не знайдено.")
@@ -205,15 +208,18 @@ def extract_preorder_date(soup, raw_html=""):
 def detect_product_status(soup, url, raw_html=""):
     stock = soup.select_one(".product-info-stock-sku .stock")
     button = soup.select_one("#product-addtocart-button")
+
     notify_link = soup.select_one(
         ".product.alert.stock a.action.alert"
     )
+
     preorder_message = soup.select_one(".preorder-message-block")
 
     stock_text = (
         stock.get_text(" ", strip=True).lower()
         if stock else ""
     )
+
     stock_classes = stock.get("class", []) if stock else []
 
     button_text = (
@@ -226,16 +232,19 @@ def detect_product_status(soup, url, raw_html=""):
     print(f"  DEBUG: stock text = {stock_text!r}")
     print(f"  DEBUG: stock classes = {stock_classes}")
     print(f"  DEBUG: button text = {button_text!r}")
-    print(f"  DEBUG: preorder message found = {preorder_message is not None}")
+    print(
+        "  DEBUG: preorder message found =",
+        preorder_message is not None,
+    )
 
-    # 1. Немає в наявності
+    # 1. Немає в наявності.
     if (
         "unavailable" in stock_classes
         or "out of stock" in stock_text
     ):
         return "out_of_stock", None
 
-    # 2. Попереднє замовлення
+    # 2. Попереднє замовлення.
     if (
         preorder_date is not None
         or "pre order" in button_text
@@ -244,17 +253,15 @@ def detect_product_status(soup, url, raw_html=""):
     ):
         return "pre_order", preorder_date
 
-    # 3. Є в наявності.
-    # Потрібне явне підтвердження "In stock".
-    # Самої кнопки "Add to Cart" недостатньо.
+    # 3. Наявність підтверджена явним текстом In stock.
     if "in stock" in stock_text:
         return "in_stock", None
 
-    # 4. Інша явна ознака відсутності
+    # 4. Інша явна ознака відсутності.
     if notify_link is not None:
         return "out_of_stock", None
 
-    # Не вгадуємо статус за самою кнопкою Add to Cart.
+    # Не вгадуємо статус, якщо ознак недостатньо.
     print("  ⚠️ Статус невідомий: недостатньо ознак.")
     return "unknown", None
 
@@ -275,8 +282,8 @@ def check_product(url):
             )
             response.raise_for_status()
 
-            # Діагностика відповіді саме від NKON.
             soup = BeautifulSoup(response.text, "html.parser")
+
             title_element = soup.find("title")
             page_title = (
                 title_element.get_text(" ", strip=True)
@@ -287,20 +294,26 @@ def check_product(url):
             print(f"  DEBUG: URL після запиту: {response.url}")
             print(f"  DEBUG: HTML length: {len(response.text)}")
             print(f"  DEBUG: page title: {page_title}")
+
             print(
                 "  DEBUG: shipping date text:",
                 "Estimated shipping date" in response.text,
             )
+
             print(
                 "  DEBUG: preorder text:",
                 "This product is for pre-order" in response.text,
             )
+
             print(
                 "  DEBUG: знайдені дати:",
-                re.findall(r"\b\d{2}-\d{2}-\d{4}\b", response.text)[:10],
+                re.findall(
+                    r"\b\d{2}-\d{2}-\d{4}\b",
+                    response.text,
+                )[:10],
             )
 
-            # Переконуємося, що це сторінка товару.
+            # Переконуємося, що отримали сторінку товару.
             if not soup.select_one(".product-info-price"):
                 raise ValueError(
                     "Не знайдено .product-info-price. "
@@ -318,6 +331,7 @@ def check_product(url):
                     "  ⚠️ Результат неоднозначний. "
                     "Кеш цього товару не оновлюємо."
                 )
+
                 return {
                     "success": False,
                     "name": name,
@@ -332,12 +346,14 @@ def check_product(url):
                 "pre_order": "🟡 Попереднє замовлення",
             }
 
+            # Дату навмисно не додаємо до статусу.
+            # Вона відображатиметься окремим рядком у Telegram.
             status_text = status_texts[state]
 
-            if state == "pre_order" and date:
-                status_text += f" (очікувана дата: {date})"
-
-            print(f"  → Статус: {status_text}")
+            print(
+                f"  → Статус: {status_text}"
+                + (f" (дата: {date})" if date else "")
+            )
 
             return {
                 "success": True,
@@ -382,13 +398,27 @@ def format_change_message(item):
         f"Новий статус: {status_text}",
     ]
 
-    if item.get("date"):
+    # Якщо змінилася лише дата — показуємо обидві дати.
+    if item.get("change_type") == "date_changed":
+        old_date = html.escape(item["old_date"])
+        new_date = html.escape(item["date"])
+
         lines.append(
-            f"📅 Очікувана дата відвантаження: "
-            f"<b>{html.escape(item['date'])}</b>"
+            f"📅 Дату відвантаження змінено: "
+            f"<b>{old_date} → {new_date}</b>"
         )
 
-    lines.append(url)
+    # Для інших змін показуємо актуальну дату один раз.
+    elif item.get("date"):
+        date = html.escape(item["date"])
+
+        lines.append(
+            f"📅 Очікувана дата відвантаження: "
+            f"<b>{date}</b>"
+        )
+
+    lines.append(f'<a href="{url}">Відкрити товар на NKON</a>')
+
     return "\n".join(lines)
 
 
@@ -452,7 +482,7 @@ def main():
         try:
             result = check_product(url)
 
-            # Якщо результат непевний, не змінюємо кеш.
+            # Непевні результати не змінюють кеш.
             if not result["success"]:
                 continue
 
@@ -461,6 +491,7 @@ def main():
             # Новий товар додається до кешу без сповіщення.
             if old_record is None:
                 print("  ℹ️ Перший запис у кеш — без сповіщення.")
+
                 new_cache[url] = {
                     "state": result["state"],
                     "date": result["date"],
@@ -486,8 +517,8 @@ def main():
                 and old_date != new_date
             )
 
-            # Якщо дата тимчасово не доступна, не стираємо
-            # раніше збережену дату для того самого pre-order.
+            # Не стираємо збережену дату, якщо сайт
+            # тимчасово не повернув її для передзамовлення.
             if (
                 new_state == "pre_order"
                 and new_date is None
@@ -495,6 +526,7 @@ def main():
                 and old_date is not None
             ):
                 new_date = old_date
+
                 print(
                     "  ℹ️ Залишаємо попередню дату: "
                     f"{old_date}"
@@ -511,6 +543,7 @@ def main():
                     "url": url,
                     "status_text": result["status_text"],
                     "date": new_date,
+                    "change_type": "status_changed",
                 })
 
             elif date_changed:
@@ -522,13 +555,16 @@ def main():
                 changes.append({
                     "name": result["name"],
                     "url": url,
-                    "status_text": "📅 Змінилася очікувана дата відвантаження",
+                    "status_text": "🟡 Попереднє замовлення",
+                    "old_date": old_date,
                     "date": new_date,
+                    "change_type": "date_changed",
                 })
 
             else:
                 print("  ✓ Змін статусу або дати не виявлено.")
 
+            # Оновлюємо кеш перевіреного товару.
             new_cache[url] = {
                 "state": new_state,
                 "date": new_date,
