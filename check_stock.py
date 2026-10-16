@@ -29,8 +29,9 @@ HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/120.0.0.0 Safari/537.36"
-    )
+        "Chrome/131.0.0.0 Safari/537.36"
+    ),
+    "Accept-Language": "en-US,en;q=0.9,nl;q=0.8",
 }
 
 PRODUCT_NAMES = {
@@ -87,16 +88,6 @@ def send_telegram(message):
             timeout=15,
         )
         response.raise_for_status()
-            print("DEBUG: HTTP status:", response.status_code)
-            print("DEBUG: URL:", response.url)
-            print("DEBUG: HTML length:", len(response.text))
-            print("DEBUG: page title:", (
-                BeautifulSoup(response.text, "html.parser").title.get_text(" ", strip=True)
-                if BeautifulSoup(response.text, "html.parser").title
-                else "NO TITLE"
-            ))
-            print("DEBUG: shipping date text:", "Estimated shipping date" in response.text)
-            print("DEBUG: preorder text:", "This product is for pre-order" in response.text)
 
         result = response.json()
 
@@ -114,9 +105,7 @@ def send_telegram(message):
 
 # ============================================================
 # КЕШ
-# Підтримує як старий формат, так і новий:
-# "URL": "in_stock"
-# "URL": {"state": "pre_order", "date": "06-11-2026"}
+# Підтримує старий формат і новий формат із датою.
 # ============================================================
 
 def load_cache():
@@ -129,7 +118,7 @@ def load_cache():
             raw_cache = json.load(file)
 
         if not isinstance(raw_cache, dict):
-            print("⚠️ Невідомий формат кешу. Починаємо з порожнього.")
+            print("⚠️ Невідомий формат кешу.")
             return {}
 
         cache = {}
@@ -140,7 +129,6 @@ def load_cache():
                     "state": value,
                     "date": None,
                 }
-
             elif isinstance(value, dict):
                 cache[url] = {
                     "state": value.get("state"),
@@ -175,67 +163,63 @@ def save_cache(cache):
 
 
 # ============================================================
-# ВИТЯГУВАННЯ ДАТИ ВІДВАНТАЖЕННЯ
-# Приклад на сайті: Estimated shipping date: 06-11-2026
+# ПОШУК ДАТИ ВІДВАНТАЖЕННЯ
+# Приклад: Estimated shipping date: 06-11-2026
 # ============================================================
 
-def extract_preorder_date(soup):
+def extract_preorder_date(soup, raw_html=""):
     element = soup.select_one(".ampreorder-observed")
 
     if element:
         text = element.get_text(" ", strip=True)
+        print(f"  DEBUG: .ampreorder-observed: {text}")
+    else:
+        text = ""
+        print("  DEBUG: .ampreorder-observed у HTML не знайдено.")
+
+    # Спочатку шукаємо дату в спеціальному елементі.
+    match = re.search(r"\b(\d{2}-\d{2}-\d{4})\b", text)
+
+    # Якщо елемента немає або в ньому немає дати,
+    # шукаємо її в усьому HTML-відгуку сервера.
+    if not match and raw_html:
         match = re.search(
-            r"(\d{2})-(\d{2})-(\d{4})",
-            text,
+            r"estimated\s+shipping\s+date\s*:\s*"
+            r"(\d{2}-\d{2}-\d{4})",
+            raw_html,
+            re.IGNORECASE,
         )
 
-        if match:
-            date_text = match.group(0)
-
-            try:
-                datetime.strptime(date_text, "%d-%m-%Y")
-                print(f"  📅 Знайдено дату відвантаження: {date_text}")
-                return date_text
-
-            except ValueError:
-                print(f"  ⚠️ Некоректна дата: {date_text}")
-
-        else:
-            print(f"  ℹ️ Елемент дати знайдено, але дати в ньому немає: {text}")
-
-    else:
-        print("  ℹ️ Елемент .ampreorder-observed у HTML не знайдено.")
-
-    # Запасний пошук дати в тексті сторінки.
-    # Використовується лише якщо є згадка про shipping date.
-    page_text = soup.get_text(" ", strip=True)
-
-    if re.search(r"estimated\s+shipping\s+date", page_text, re.I):
+    # Додаткова перевірка видимого тексту HTML.
+    if not match:
+        page_text = soup.get_text(" ", strip=True)
         match = re.search(
             r"estimated\s+shipping\s+date\s*:\s*"
             r"(\d{2}-\d{2}-\d{4})",
             page_text,
-            re.I,
+            re.IGNORECASE,
         )
 
-        if match:
-            date_text = match.group(1)
+    if not match:
+        print("  DEBUG: Дату відвантаження у відповіді сервера не знайдено.")
+        return None
 
-            try:
-                datetime.strptime(date_text, "%d-%m-%Y")
-                print(f"  📅 Дату знайдено запасним способом: {date_text}")
-                return date_text
-            except ValueError:
-                pass
+    date_text = match.group(1)
 
-    return None
+    try:
+        datetime.strptime(date_text, "%d-%m-%Y")
+        print(f"  📅 Знайдено дату відвантаження: {date_text}")
+        return date_text
+    except ValueError:
+        print(f"  ⚠️ Некоректна дата: {date_text}")
+        return None
 
 
 # ============================================================
 # ВИЗНАЧЕННЯ СТАТУСУ ТОВАРУ
 # ============================================================
 
-def detect_product_status(soup, url):
+def detect_product_status(soup, url, raw_html=""):
     stock = soup.select_one(".product-info-stock-sku .stock")
     button = soup.select_one("#product-addtocart-button")
     notify_link = soup.select_one(
@@ -254,7 +238,12 @@ def detect_product_status(soup, url):
         if button else ""
     )
 
-    preorder_date = extract_preorder_date(soup)
+    preorder_date = extract_preorder_date(soup, raw_html)
+
+    print(f"  DEBUG: stock text = {stock_text!r}")
+    print(f"  DEBUG: stock classes = {stock_classes}")
+    print(f"  DEBUG: button text = {button_text!r}")
+    print(f"  DEBUG: preorder message found = {preorder_message is not None}")
 
     # 1. Немає в наявності
     if (
@@ -272,21 +261,18 @@ def detect_product_status(soup, url):
     ):
         return "pre_order", preorder_date
 
-    # 3. Є в наявності
-    if (
-        "available" in stock_classes
-        and (
-            "in stock" in stock_text
-            or "add to cart" in button_text
-        )
-    ):
+    # 3. Є в наявності.
+    # Потрібне явне підтвердження "In stock".
+    # Самої кнопки "Add to Cart" недостатньо.
+    if "in stock" in stock_text:
         return "in_stock", None
 
-    # 4. Альтернативна ознака відсутності товару
+    # 4. Інша явна ознака відсутності
     if notify_link is not None:
         return "out_of_stock", None
 
-    print("  ⚠️ Не вдалося достовірно визначити статус товару.")
+    # Не вгадуємо статус за самою кнопкою Add to Cart.
+    print("  ⚠️ Статус невідомий: недостатньо ознак.")
     return "unknown", None
 
 
@@ -306,20 +292,49 @@ def check_product(url):
             )
             response.raise_for_status()
 
+            # Діагностика відповіді саме від NKON.
             soup = BeautifulSoup(response.text, "html.parser")
+            title_element = soup.find("title")
+            page_title = (
+                title_element.get_text(" ", strip=True)
+                if title_element else "NO TITLE"
+            )
 
-            # Переконуємося, що завантажено сторінку товару,
-            # а не сторінку помилки чи блокування.
+            print(f"  DEBUG: HTTP status: {response.status_code}")
+            print(f"  DEBUG: URL після запиту: {response.url}")
+            print(f"  DEBUG: HTML length: {len(response.text)}")
+            print(f"  DEBUG: page title: {page_title}")
+            print(
+                "  DEBUG: shipping date text:",
+                "Estimated shipping date" in response.text,
+            )
+            print(
+                "  DEBUG: preorder text:",
+                "This product is for pre-order" in response.text,
+            )
+            print(
+                "  DEBUG: знайдені дати:",
+                re.findall(r"\b\d{2}-\d{2}-\d{4}\b", response.text)[:10],
+            )
+
+            # Переконуємося, що це сторінка товару.
             if not soup.select_one(".product-info-price"):
                 raise ValueError(
-                    "У відповіді не знайдено блок .product-info-price. "
-                    "Можливо, сайт повернув іншу сторінку."
+                    "Не знайдено .product-info-price. "
+                    "Можливо, NKON повернув іншу сторінку."
                 )
 
-            state, date = detect_product_status(soup, url)
+            state, date = detect_product_status(
+                soup,
+                url,
+                response.text,
+            )
 
             if state == "unknown":
-                print(f"  ⚠️ Статус невідомий для {url}")
+                print(
+                    "  ⚠️ Результат неоднозначний. "
+                    "Кеш цього товару не оновлюємо."
+                )
                 return {
                     "success": False,
                     "name": name,
@@ -339,7 +354,7 @@ def check_product(url):
             if state == "pre_order" and date:
                 status_text += f" (очікувана дата: {date})"
 
-            print(f"  → {status_text}")
+            print(f"  → Статус: {status_text}")
 
             return {
                 "success": True,
@@ -377,10 +392,11 @@ def check_product(url):
 def format_change_message(item):
     name = html.escape(item["name"])
     url = html.escape(item["url"], quote=True)
+    status_text = html.escape(item["status_text"])
 
     lines = [
         f"<b>{name}</b>",
-        f"Новий статус: {item['status_text']}",
+        f"Новий статус: {status_text}",
     ]
 
     if item.get("date"):
@@ -390,7 +406,6 @@ def format_change_message(item):
         )
 
     lines.append(url)
-
     return "\n".join(lines)
 
 
@@ -454,13 +469,13 @@ def main():
         try:
             result = check_product(url)
 
-            # Не оновлюємо кеш, якщо перевірка не вдалася.
+            # Якщо результат непевний, не змінюємо кеш.
             if not result["success"]:
                 continue
 
             old_record = cache.get(url)
 
-            # Перший запис товару — без повідомлення.
+            # Новий товар додається до кешу без сповіщення.
             if old_record is None:
                 print("  ℹ️ Перший запис у кеш — без сповіщення.")
                 new_cache[url] = {
@@ -481,15 +496,15 @@ def main():
             )
 
             date_changed = (
-                new_state == "pre_order"
-                and old_state == "pre_order"
+                old_state == "pre_order"
+                and new_state == "pre_order"
                 and old_date is not None
                 and new_date is not None
                 and old_date != new_date
             )
 
-            # Зберігаємо раніше відому дату, якщо сторінка
-            # тимчасово не повернула дату для pre-order.
+            # Якщо дата тимчасово не доступна, не стираємо
+            # раніше збережену дату для того самого pre-order.
             if (
                 new_state == "pre_order"
                 and new_date is None
@@ -498,8 +513,8 @@ def main():
             ):
                 new_date = old_date
                 print(
-                    "  ℹ️ Нову дату не отримано; "
-                    f"залишаємо попередню: {old_date}"
+                    "  ℹ️ Залишаємо попередню дату: "
+                    f"{old_date}"
                 )
 
             if state_changed:
@@ -524,9 +539,7 @@ def main():
                 changes.append({
                     "name": result["name"],
                     "url": url,
-                    "status_text": (
-                        "📅 Змінилася очікувана дата відвантаження"
-                    ),
+                    "status_text": "📅 Змінилася очікувана дата відвантаження",
                     "date": new_date,
                 })
 
@@ -545,7 +558,6 @@ def main():
         finally:
             time.sleep(REQUEST_DELAY)
 
-    # Зберігаємо кеш до надсилання повідомлень.
     save_cache(new_cache)
 
     if changes:
