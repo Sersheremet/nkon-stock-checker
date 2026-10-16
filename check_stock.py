@@ -88,13 +88,16 @@ def check_product(url):
             status_text = "⚠️ Невизначений статус"
 
         return {
+            "success": True,
             "name": name,
             "url": url,
             "state_key": state_key,
             "status_text": status_text
         }
     except Exception as e:
+        print(f"Помилка під час запиту до {url}: {e}")
         return {
+            "success": False,
             "name": url,
             "url": url,
             "state_key": "error",
@@ -118,12 +121,19 @@ def main():
     for url in urls:
         print(f"Checking: {url}")
         res = check_product(url)
+        
+        # Якщо сталася мережева помилка (сайт ліг / тайм-аут)
+        if not res["success"]:
+            print(f"  ⚠️ Пропускаємо оновлення кешу через помилку зв'язку з сайтом.")
+            # Кеш для цього url не чіпаємо (залишаємо старий стан), у changes не додаємо
+            continue
+
         old_state = cache.get(url, None)
         new_state = res["state_key"]
 
         print(f"  → Статус: {res['status_text']} (Минулий: {old_state}, Новий: {new_state})")
 
-        # Головне покращення: перевіряємо зміну ТІЛЬКИ якщо товар вже був у кеші
+        # Перевіряємо зміну ТІЛЬКИ якщо товар вже був у кеші
         if old_state is not None and old_state != new_state:
             changes.append({
                 "name": res["name"],
