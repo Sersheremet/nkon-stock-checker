@@ -87,13 +87,16 @@ def send_telegram(message):
             timeout=15,
         )
         response.raise_for_status()
-        print("DEBUG: amp preorder element:", "ampreorder-observed" in response.text)
-        print("DEBUG: shipping date text:", "Estimated shipping date" in response.text)
-        print("DEBUG: preorder text:", "This product is for pre-order" in response.text)
-        print(
-            "DEBUG: знайдені дати:",
-            re.findall(r"\d{2}-\d{2}-\d{4}", response.text)[:10]
-        )
+            print("DEBUG: HTTP status:", response.status_code)
+            print("DEBUG: URL:", response.url)
+            print("DEBUG: HTML length:", len(response.text))
+            print("DEBUG: page title:", (
+                BeautifulSoup(response.text, "html.parser").title.get_text(" ", strip=True)
+                if BeautifulSoup(response.text, "html.parser").title
+                else "NO TITLE"
+            ))
+            print("DEBUG: shipping date text:", "Estimated shipping date" in response.text)
+            print("DEBUG: preorder text:", "This product is for pre-order" in response.text)
 
         result = response.json()
 
