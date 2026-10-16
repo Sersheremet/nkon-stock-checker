@@ -471,7 +471,11 @@ def main():
         return
 
     cache = load_cache()
-    new_cache = cache.copy()
+    new_cache = {
+    url: cache[url]
+    for url in urls
+    if url in cache
+    }
     changes = []
 
     print(f"\n🔎 Перевіряємо товарів: {len(urls)}\n")
