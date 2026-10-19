@@ -42,10 +42,19 @@ TELEGRAM_MAX_LENGTH = 3500
 
 def get_product_name(url):
     url_lower = url.lower()
+    
+    # 1. Шукаємо у готовому словнику
     for key, name in PRODUCT_NAMES.items():
         if key in url_lower:
             return name
-    return url
+
+    # 2. Якщо товару немає в словнику — формуємо охайну назву з URL
+    try:
+        slug = url.split('/')[-1].split('?')[0].replace('.html', '')
+        clean_name = slug.replace('-', ' ').title()
+        return clean_name
+    except Exception:
+        return url
 
 def get_products_from_github():
     url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/products.txt"
@@ -246,7 +255,6 @@ def telegram_webhook():
         send_telegram(chat_id, welcome_text, reply_markup=get_main_keyboard())
 
     elif text == "🔍 Перевірити всі товари":
-        # Миттєво відповідаємо Телеграму і запускаємо звіт у фоновому потоці
         threading.Thread(target=run_report_from_cache, args=(chat_id,)).start()
 
     return jsonify({"status": "ok"})
