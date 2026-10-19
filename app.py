@@ -11,6 +11,10 @@ from flask import Flask, render_template, request, jsonify
 
 app = Flask(__name__)
 
+# ============================================================
+# НАЛАШТУВАННЯ ТА ЗМІННІ ОТОЧЕННЯ
+# ============================================================
+
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 GITHUB_REPO = os.getenv("GITHUB_REPO")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -18,6 +22,15 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 HEADERS_GITHUB = {
     "Authorization": f"Bearer {GITHUB_TOKEN}",
     "Accept": "application/vnd.github+json"
+}
+
+HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/131.0.0.0 Safari/537.36"
+    ),
+    "Accept-Language": "en-US,en;q=0.9,nl;q=0.8",
 }
 
 PRODUCT_NAMES = {
@@ -30,6 +43,16 @@ PRODUCT_NAMES = {
     "deye-se-f12": "Deye SE-F12-C (батарея)",
     "sun-5k-sg06": "Deye SUN-5K SG06 (інвертор 5 кВт)",
 }
+
+REQUEST_TIMEOUT = 20
+REQUEST_RETRIES = 2
+REQUEST_DELAY = 1.0
+TELEGRAM_MAX_LENGTH = 3500
+
+
+# ============================================================
+# ДОПОМІЖНІ ФУНКЦІЇ
+# ============================================================
 
 def get_product_name(url):
     url_lower = url.lower()
@@ -61,19 +84,26 @@ def save_products_to_github(products, sha, commit_message):
     response = requests.put(url, headers=HEADERS_GITHUB, json=payload)
     return response.status_code in [200, 201]
 
-def send_telegram_message(chat_id, text, reply_markup=None):
+def send_telegram(chat_id, message, reply_markup=None):
     if not TELEGRAM_BOT_TOKEN:
-        return
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+        return False
+
+    api_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {
         "chat_id": chat_id,
-        "text": text,
+        "text": message,
         "parse_mode": "HTML",
-        "disable_web_page_preview": True
+        "disable_web_page_preview": True,
     }
     if reply_markup:
         payload["reply_markup"] = reply_markup
-    requests.post(url, json=payload)
+
+    try:
+        response = requests.post(api_url, json=payload, timeout=15)
+        return response.status_code == 200
+    except Exception as error:
+        print(f"❌ Помилка Telegram: {error}")
+        return False
 
 def get_main_keyboard():
     return {
@@ -82,6 +112,11 @@ def get_main_keyboard():
         ],
         "resize_keyboard": True
     }
+
+
+# ============================================================
+# ЛОГІКА ПАРСИНГУ ТОВАРІВ (З check_stock.py)
+# ============================================================
 
 def extract_preorder_date(soup, raw_html=""):
     element = soup.select_one(".ampreorder-observed")
@@ -97,7 +132,7 @@ def extract_preorder_date(soup, raw_html=""):
             return dates[0]
     return None
 
-def detect_product_status(soup, raw_html=""):
+def detect_product_status(soup, url, raw_html=""):
     stock = soup.select_one(".product-info-stock-sku .stock")
     button = soup.select_one("#product-addtocart-button")
     notify_link = soup.select_one(".product.alert.stock a.action.alert")
@@ -106,84 +141,118 @@ def detect_product_status(soup, raw_html=""):
     stock_text = stock.get_text(" ", strip=True).lower() if stock else ""
     stock_classes = stock.get("class", []) if stock else []
     button_text = button.get_text(" ", strip=True).lower() if button else ""
+
     preorder_date = extract_preorder_date(soup, raw_html)
 
     if "unavailable" in stock_classes or "out of stock" in stock_text:
-        return "out_of_stock", None, "❌ Немає в наявності"
+        return "out_of_stock", None
 
     if preorder_date is not None or "pre order" in button_text or "pre-order" in button_text or preorder_message is not None:
-        return "pre_order", preorder_date, "🟡 Попереднє замовлення"
+        return "pre_order", preorder_date
 
     if "in stock" in stock_text:
-        return "in_stock", None, "✅ Є в наявності"
+        return "in_stock", None
 
     if notify_link is not None:
-        return "out_of_stock", None, "❌ Немає в наявності"
+        return "out_of_stock", None
 
-    return "unknown", None, "⚪ Статус невідомий"
+    return "unknown", None
 
-def check_single_product(url):
+def check_product(url):
     name = get_product_name(url)
-    for attempt in range(2):
-        try:
-            proxy_url = f"https://api.allorigins.win/get?url={requests.utils.quote(url)}"
-            response = requests.get(proxy_url, timeout=25)
-            response.raise_for_status()
-            
-            data = response.json()
-            html_content = data.get("contents", "")
-            if not html_content:
-                raise ValueError("Порожня відповідь проксі")
 
-            soup = BeautifulSoup(html_content, "html.parser")
-            state, date, status_text = detect_product_status(soup, html_content)
+    for attempt in range(REQUEST_RETRIES + 1):
+        try:
+            response = requests.get(url, headers=HEADERS, timeout=REQUEST_TIMEOUT)
+            response.raise_for_status()
+
+            soup = BeautifulSoup(response.text, "html.parser")
+
+            if not soup.select_one(".product-info-price"):
+                raise ValueError("Не знайдено .product-info-price")
+
+            state, date = detect_product_status(soup, url, response.text)
+
+            status_texts = {
+                "in_stock": "✅ Є в наявності",
+                "out_of_stock": "❌ Немає в наявності",
+                "pre_order": "🟡 Попереднє замовлення",
+                "unknown": "⚪ Статус невідомий"
+            }
+
             return {
                 "success": True,
                 "name": name,
                 "url": url,
                 "state": state,
                 "date": date,
-                "status_text": status_text
+                "status_text": status_texts.get(state, "⚪ Статус невідомий")
             }
-        except Exception:
-            if attempt == 0:
-                time.sleep(1.5)
-            else:
-                return {
-                    "success": False,
-                    "name": name,
-                    "url": url,
-                    "status_text": "❌ Помилка завантаження"
-                }
 
-def process_and_send_report(chat_id):
-    send_telegram_message(chat_id, "⏳ Збираю актуальну інформацію про всі товари з NKON, зачекайте хвилинку...")
-    
+        except Exception as error:
+            if attempt < REQUEST_RETRIES:
+                time.sleep(1.5)
+
+    return {
+        "success": False,
+        "name": name,
+        "url": url,
+        "state": "error",
+        "date": None,
+        "status_text": "⚠️ Помилка завантаження"
+    }
+
+
+# ============================================================
+# ЗБІР І ВІДПРАВКА ЗВІТУ
+# ============================================================
+
+def format_product_message(item):
+    name = html.escape(item["name"])
+    url = html.escape(item["url"], quote=True)
+    status_text = html.escape(item["status_text"])
+
+    lines = [
+        f"<b>{name}</b>",
+        f"Статус: {status_text}",
+    ]
+
+    if item.get("date"):
+        date = html.escape(item["date"])
+        lines.append(f"📅 Очікувана дата відвантаження: <b>{date}</b>")
+
+    lines.append(f'<a href="{url}">Відкрити товар на NKON</a>')
+    return "\n".join(lines)
+
+def run_check_and_report(chat_id):
+    send_telegram(chat_id, "⏳ Збираю інформацію про всі товари, зачекайте...")
+
     products = get_products_from_github()
     if not products:
-        send_telegram_message(chat_id, "📋 <b>Список відстежуваних товарів порожній.</b>\nДодайте посилання через WebApp!", reply_markup=get_main_keyboard())
+        send_telegram(chat_id, "⚠️ Список товарів у products.txt порожній.", reply_markup=get_main_keyboard())
         return
 
-    report_lines = ["📦 <b>Поточний статус усіх товарів на NKON:</b>\n"]
+    heading = "📦 <b>Поточний статус усіх товарів NKON</b>\n\n"
+    current_message = heading
 
     for url in products:
-        res = check_single_product(url)
-        name = html.escape(res["name"])
-        url_escaped = html.escape(res["url"], quote=True)
-        status_text = html.escape(res["status_text"])
+        result = check_product(url)
+        block = format_product_message(result) + "\n\n"
 
-        item_lines = [f"<b>{name}</b>", f"Статус: {status_text}"]
+        if len(current_message) + len(block) > TELEGRAM_MAX_LENGTH and current_message != heading:
+            send_telegram(chat_id, current_message.strip())
+            current_message = heading
 
-        if res.get("date"):
-            date_str = html.escape(res["date"])
-            item_lines.append(f"📅 Дата відвантаження: <b>{date_str}</b>")
+        current_message += block
+        time.sleep(REQUEST_DELAY)
 
-        item_lines.append(f'<a href="{url_escaped}">Відкрити товар на NKON</a>\n')
-        report_lines.append("\n".join(item_lines))
-        time.sleep(0.5)
+    if current_message.strip() != heading.strip():
+        send_telegram(chat_id, current_message.strip(), reply_markup=get_main_keyboard())
 
-    report_text = "\n".join(report_lines)
-    send_telegram_message(chat_id, report_text, reply_markup=get_main_keyboard())
+
+# ============================================================
+# FLASK МАРШРУТИ ТА WEBHOOK
+# ============================================================
 
 @app.route("/")
 def index():
@@ -191,14 +260,8 @@ def index():
 
 @app.route("/api/products", methods=["GET"])
 def list_products():
-    url_github = f"https://api.github.com/repos/{GITHUB_REPO}/contents/products.txt"
-    response = requests.get(url_github, headers=HEADERS_GITHUB)
-    if response.status_code == 200:
-        file_data = response.json()
-        content = base64.b64decode(file_data["content"]).decode("utf-8")
-        products = [line.strip() for line in content.splitlines() if line.strip()]
-        return jsonify({"products": products})
-    return jsonify({"products": []})
+    products = get_products_from_github()
+    return jsonify({"products": products})
 
 @app.route("/api/products", methods=["POST"])
 def add_product():
@@ -222,17 +285,13 @@ def add_product():
 
     products.append(url)
     success = save_products_to_github(products, sha, f"Add product via WebApp: {url}")
-    
-    if success:
-        return jsonify({"success": True})
-    else:
-        return jsonify({"success": False, "error": "Помилка збереження"}), 500
+    return jsonify({"success": success})
 
 @app.route("/api/products", methods=["DELETE"])
 def delete_product():
     data = request.json
     url_to_delete = data.get("url", "").strip()
-    
+
     url_github = f"https://api.github.com/repos/{GITHUB_REPO}/contents/products.txt"
     response = requests.get(url_github, headers=HEADERS_GITHUB)
     if response.status_code != 200:
@@ -248,11 +307,7 @@ def delete_product():
 
     products.remove(url_to_delete)
     success = save_products_to_github(products, sha, f"Delete product via WebApp: {url_to_delete}")
-    
-    if success:
-        return jsonify({"success": True})
-    else:
-        return jsonify({"success": False, "error": "Помилка оновлення"}), 500
+    return jsonify({"success": success})
 
 @app.route("/webhook", methods=["POST"])
 def telegram_webhook():
@@ -265,12 +320,12 @@ def telegram_webhook():
     text = message.get("text", "")
 
     if text in ["/start", "/help"]:
-        welcome_text = "Вітаю! Натисніть кнопку нижче, щоб отримати повний звіт по всіх товарах NKON."
-        send_telegram_message(chat_id, welcome_text, reply_markup=get_main_keyboard())
+        welcome_text = "Вітаю! Натисніть кнопку нижче, щоб швидко перевірити всі товари."
+        send_telegram(chat_id, welcome_text, reply_markup=get_main_keyboard())
 
     elif text == "🔍 Перевірити всі товари":
-        # Запускаємо важкий парсинг у фоновому потоці, щоб Telegram отримав миттєву відповідь 200 OK
-        threading.Thread(target=process_and_send_report, args=(chat_id,)).start()
+        # Фоновий потік, щоб Telegram отримав розрив з'єднання одразу і не робив повторних запитів
+        threading.Thread(target=run_check_and_report, args=(chat_id,)).start()
 
     return jsonify({"status": "ok"})
 
