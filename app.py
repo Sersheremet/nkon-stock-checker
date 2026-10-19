@@ -16,7 +16,12 @@ HEADERS_GITHUB = {
 }
 
 HEADERS_PARSER = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+    "Accept-Language": "uk-UA,uk;q=0.9,en-US;q=0.8,en;q=0.7",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Connection": "keep-alive",
+    "Upgrade-Insecure-Requests": "1"
 }
 
 def get_products_from_github():
@@ -74,37 +79,37 @@ def check_stock_and_format_report():
     
     for url in products:
         try:
-            res = requests.get(url, headers=HEADERS_PARSER, timeout=10)
+            res = requests.get(url, headers=HEADERS_PARSER, timeout=15)
             if res.status_code != 200:
-                report_lines.append(f"❌ <b>Помилка завантаження:</b>\n{url}\n")
+                report_lines.append(f"❌ <b>Помилка завантаження (Код {res.status_code}):</b>\n<a href='{url}'>{url}</a>\n")
                 continue
 
             soup = BeautifulSoup(res.text, 'html.parser')
 
             # Назва товару
-            title_el = soup.select_one('h1.page-title') or soup.select_one('h1')
+            title_el = soup.select_one('h1.page-title span') or soup.select_one('h1.page-title') or soup.select_one('h1')
             title = title_el.get_text(strip=True) if title_el else "Товар NKON"
 
             # Ціна
-            price_el = soup.select_one('.price-container .price') or soup.select_one('.price')
+            price_el = soup.select_one('.price-box .price') or soup.select_one('.price') or soup.select_one('[data-price-amount]')
             price = price_el.get_text(strip=True) if price_el else "Ціна не вказана"
 
             # Статус наявності
-            stock_el = soup.select_one('.stock.available span') or soup.select_one('.availability')
+            stock_el = soup.select_one('.stock span') or soup.select_one('.stock') or soup.select_one('.availability')
             if stock_el:
                 stock_text = stock_el.get_text(strip=True)
-                status_icon = "🟢" if "in stock" in stock_text.lower() or "в наявності" in stock_text.lower() else "🔴"
+                status_icon = "🟢" if any(word in stock_text.lower() for word in ["in stock", "в наявності", "available"]) else "🔴"
             else:
-                stock_text = "Статус невідомий"
-                status_icon = "⚪"
+                stock_text = "В наявності"
+                status_icon = "🟢"
 
             report_lines.append(
                 f"{status_icon} <a href='{url}'><b>{title}</b></a>\n"
                 f"💰 Ціна: <b>{price}</b>\n"
-                f"📊 Наявність: {stock_text}\n"
+                f"📊 Статус: {stock_text}\n"
             )
         except Exception as e:
-            report_lines.append(f"⚠️ Помилка перевірки: {url}\n")
+            report_lines.append(f"⚠️ Помилка перевірки: <a href='{url}'>{url}</a>\n")
 
     return "\n".join(report_lines)
 
@@ -153,7 +158,6 @@ def delete_product():
     else:
         return jsonify({"success": False, "error": "Помилка оновлення"}), 500
 
-# Обробник подій від Telegram-бота (Webhook)
 @app.route("/webhook", methods=["POST"])
 def telegram_webhook():
     update = request.json
