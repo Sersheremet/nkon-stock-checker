@@ -15,15 +15,6 @@ HEADERS_GITHUB = {
     "Accept": "application/vnd.github+json"
 }
 
-HEADERS_PARSER = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-    "Accept-Language": "uk-UA,uk;q=0.9,en-US;q=0.8,en;q=0.7",
-    "Accept-Encoding": "gzip, deflate, br",
-    "Connection": "keep-alive",
-    "Upgrade-Insecure-Requests": "1"
-}
-
 def get_products_from_github():
     url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/products.txt"
     response = requests.get(url, headers=HEADERS_GITHUB)
@@ -79,12 +70,22 @@ def check_stock_and_format_report():
     
     for url in products:
         try:
-            res = requests.get(url, headers=HEADERS_PARSER, timeout=15)
+            # Використовуємо безкоштовний публічний проксі для обходу блокування 403 на Render
+            proxy_url = f"https://api.allorigins.win/get?url={requests.utils.quote(url)}"
+            res = requests.get(proxy_url, timeout=20)
+            
             if res.status_code != 200:
                 report_lines.append(f"❌ <b>Помилка завантаження (Код {res.status_code}):</b>\n<a href='{url}'>{url}</a>\n")
                 continue
 
-            soup = BeautifulSoup(res.text, 'html.parser')
+            data = res.json()
+            html_content = data.get("contents", "")
+            
+            if not html_content:
+                report_lines.append(f"❌ <b>Порожня відповідь від сторінки:</b>\n<a href='{url}'>{url}</a>\n")
+                continue
+
+            soup = BeautifulSoup(html_content, 'html.parser')
 
             # Назва товару
             title_el = soup.select_one('h1.page-title span') or soup.select_one('h1.page-title') or soup.select_one('h1')
