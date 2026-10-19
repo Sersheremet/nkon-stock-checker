@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Моніторинг NKON</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--tg-theme-bg-color, #f4f4f5);
+            color: var(--tg-theme-text-color, #222);
+            margin: 0;
+            padding: 16px;
+        }
+        h2 {
+            font-size: 18px;
+            margin-top: 10px;
+            margin-bottom: 12px;
+        }
+        .card {
+            background: var(--tg-theme-secondary-bg-color, #fff);
+            padding: 12px;
+            border-radius: 12px;
+            margin-bottom: 10px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            font-size: 13px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 10px;
+        }
+        .card-link {
+            color: var(--tg-theme-link-color, #2481cc);
+            text-decoration: none;
+            word-break: break-all;
+            max-width: 80%;
+        }
+        input {
+            width: 100%;
+            padding: 12px;
+            border-radius: 10px;
+            border: 1px solid #ccc;
+            font-size: 14px;
+            box-sizing: border-box;
+            margin-bottom: 10px;
+            background: var(--tg-theme-bg-color, #fff);
+            color: var(--tg-theme-text-color, #222);
+        }
+        button.primary {
+            width: 100%;
+            padding: 12px;
+            border-radius: 10px;
+            background-color: var(--tg-theme-button-color, #2481cc);
+            color: var(--tg-theme-button-text-color, #fff);
+            border: none;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            margin-bottom: 16px;
+        }
+        button.danger {
+            background-color: #ff3b30;
+            color: white;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            cursor: pointer;
+            flex-shrink: 0;
+        }
+        #loading {
+            text-align: center;
+            color: #888;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+
+    <h2>➕ Додати нове посилання</h2>
+    <input type="text" id="urlInput" placeholder="Вставити посилання з NKON...">
+    <button class="primary" onclick="addProduct()">Додати в моніторинг</button>
+
+    <h2>📋 Відстежувані товари</h2>
+    <div id="loading">Завантаження...</div>
+    <div id="productList"></div>
+
+    <script>
+        const tg = window.Telegram.WebApp;
+        tg.expand();
+
+        async function loadProducts() {
+            const listDiv = document.getElementById('productList');
+            const loadingDiv = document.getElementById('loading');
+            try {
+                const response = await fetch('/api/products');
+                const data = await response.json();
+                loadingDiv.style.display = 'none';
+                listDiv.innerHTML = '';
+
+                if (!response.ok) {
+                    listDiv.innerHTML = `<p style="color: #ff3b30; text-align: center;">Помилка сервера: ${data.error || response.status}</p>`;
+                    return;
+                }
+
+                if (!data.products || data.products.length === 0) {
+                    listDiv.innerHTML = '<p style="color: #888; text-align: center;">Список порожній</p>';
+                    return;
+                }
+
+                data.products.forEach(url => {
+                    const card = document.createElement('div');
+                    card.className = 'card';
+                    card.innerHTML = `
+                        <a href="${url}" target="_blank" class="card-link">${url}</a>
+                        <button class="danger" onclick="deleteProduct('${url}')">Видалити</button>
+                    `;
+                    listDiv.appendChild(card);
+                });
+            } catch (err) {
+                loadingDiv.style.display = 'block';
+                loadingDiv.innerText = 'Помилка мережі: ' + err.message;
+            }
+        }
+
+        async function addProduct() {
+            const input = document.getElementById('urlInput');
+            const url = input.value.trim();
+            if (!url) {
+                tg.showAlert('Будь ласка, введіть посилання!');
+                return;
+            }
+
+            try {
+                const res = await fetch('/api/products', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    input.value = '';
+                    loadProducts();
+                    tg.showAlert('Товар додано!');
+                } else {
+                    tg.showAlert('Помилка: ' + (data.error || 'Не вдалося додати'));
+                }
+            } catch (e) {
+                tg.showAlert('Помилка з\'єднання');
+            }
+        }
+
+        async function deleteProduct(url) {
+            tg.showConfirm('Видалити це посилання з моніторингу?', async (confirmed) => {
+                if (confirmed) {
+                    try {
+                        const res = await fetch('/api/products', {
+                            method: 'DELETE',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ url })
+                        });
+                        const data = await res.json();
+                        if (data.success) {
+                            loadProducts();
+                        } else {
+                            tg.showAlert('Помилка видалення');
+                        }
+                    } catch (e) {
+                        tg.showAlert('Помилка з\'єднання');
+                    }
+                }
+            });
+        }
+
+        loadProducts();
+    </script>
+</body>
+</html>
