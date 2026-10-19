@@ -19,11 +19,6 @@ HEADERS_GITHUB = {
     "Accept": "application/vnd.github+json"
 }
 
-HEADERS_PARSER = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-    "Accept-Language": "en-US,en;q=0.9,nl;q=0.8",
-}
-
 PRODUCT_NAMES = {
     "deye-sun-12k": "Deye SUN-12K (інвертор 12 кВт)",
     "deye-se-f16": "Deye SE-F16-C (батарея 16 кВт·год)",
@@ -130,11 +125,18 @@ def check_single_product(url):
     name = get_product_name(url)
     for attempt in range(2):
         try:
-            response = requests.get(url, headers=HEADERS_PARSER, timeout=15)
+            # Використовуємо проксі-обхідник для Render, щоб уникнути блокування Cloudflare (403/522)
+            proxy_url = f"https://api.allorigins.win/get?url={requests.utils.quote(url)}"
+            response = requests.get(proxy_url, timeout=25)
             response.raise_for_status()
-            soup = BeautifulSoup(response.text, "html.parser")
+            
+            data = response.json()
+            html_content = data.get("contents", "")
+            if not html_content:
+                raise ValueError("Порожня відповідь проксі")
 
-            state, date, status_text = detect_product_status(soup, response.text)
+            soup = BeautifulSoup(html_content, "html.parser")
+            state, date, status_text = detect_product_status(soup, html_content)
             return {
                 "success": True,
                 "name": name,
@@ -145,7 +147,7 @@ def check_single_product(url):
             }
         except Exception as e:
             if attempt == 0:
-                time.sleep(1.5)
+                time.sleep(2)
             else:
                 return {
                     "success": False,
