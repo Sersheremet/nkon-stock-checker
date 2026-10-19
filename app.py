@@ -116,6 +116,11 @@ HTML_TEMPLATE = """
                 loadingDiv.style.display = 'none';
                 listDiv.innerHTML = '';
 
+                if (!response.ok) {
+                    listDiv.innerHTML = `<p style="color: #ff3b30; text-align: center;">Помилка сервера: ${data.error || response.status}</p>`;
+                    return;
+                }
+
                 if (!data.products || data.products.length === 0) {
                     listDiv.innerHTML = '<p style="color: #888; text-align: center;">Список порожній</p>';
                     return;
@@ -131,7 +136,8 @@ HTML_TEMPLATE = """
                     listDiv.appendChild(card);
                 });
             } catch (err) {
-                loadingDiv.innerText = 'Помилка завантаження списку';
+                loadingDiv.style.display = 'block';
+                loadingDiv.innerText = 'Помилка мережі: ' + err.message;
             }
         }
 
