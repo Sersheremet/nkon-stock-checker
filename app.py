@@ -1,5 +1,9 @@
 import os
+import re
+import json
 import base64
+import html
+import time
 import requests
 from bs4 import BeautifulSoup
 from flask import Flask, render_template, request, jsonify
@@ -15,16 +19,38 @@ HEADERS_GITHUB = {
     "Accept": "application/vnd.github+json"
 }
 
+HEADERS_PARSER = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "Accept-Language": "en-US,en;q=0.9,nl;q=0.8",
+}
+
+PRODUCT_NAMES = {
+    "deye-sun-12k": "Deye SUN-12K (інвертор 12 кВт)",
+    "deye-se-f16": "Deye SE-F16-C (батарея 16 кВт·год)",
+    "deye-se-f5-pro": "Deye SE-F5 Pro-C (батарея 5.12 кВт·год)",
+    "deye-sun-8k": "Deye SUN-8K (інвертор 8 кВт)",
+    "deye-sun-5k": "Deye SUN-5K (інвертор 5 кВт)",
+    "deye-sun-6k": "Deye SUN-6K (інвертор 6 кВт)",
+    "deye-se-f12": "Deye SE-F12-C (батарея)",
+    "sun-5k-sg06": "Deye SUN-5K SG06 (інвертор 5 кВт)",
+}
+
+def get_product_name(url):
+    url_lower = url.lower()
+    for key, name in PRODUCT_NAMES.items():
+        if key in url_lower:
+            return name
+    return url
+
 def get_products_from_github():
     url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/products.txt"
     response = requests.get(url, headers=HEADERS_GITHUB)
     if response.status_code == 200:
         file_data = response.json()
         content = base64.b64decode(file_data["content"]).decode("utf-8")
-        sha = file_data["sha"]
-        products = [line.strip() for line in content.splitlines() if line.strip()]
-        return products, sha
-    return [], None
+        products = [line.strip() for line in content.splitlines() if line.strip() and not line.strip().startswith("#")]
+        return products
+    return []
 
 def save_products_to_github(products, sha, commit_message):
     url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/products.txt"
@@ -61,56 +87,95 @@ def get_main_keyboard():
         "resize_keyboard": True
     }
 
-def check_stock_and_format_report():
-    products, _ = get_products_from_github()
+def extract_preorder_date(soup, raw_html=""):
+    element = soup.select_one(".ampreorder-observed")
+    if element:
+        text = element.get_text(" ", strip=True)
+        match = re.search(r"\b\d{2}-\d{2}-\d{4}\b", text)
+        if match:
+            return match.group(0)
+
+    if raw_html and re.search(r"This product is for pre-order|Estimated shipping date", raw_html, re.IGNORECASE):
+        dates = re.findall(r"\b\d{2}-\d{2}-\d{4}\b", raw_html)
+        if dates:
+            return dates[0]
+    return None
+
+def detect_product_status(soup, raw_html=""):
+    stock = soup.select_one(".product-info-stock-sku .stock")
+    button = soup.select_one("#product-addtocart-button")
+    notify_link = soup.select_one(".product.alert.stock a.action.alert")
+    preorder_message = soup.select_one(".preorder-message-block")
+
+    stock_text = stock.get_text(" ", strip=True).lower() if stock else ""
+    stock_classes = stock.get("class", []) if stock else []
+    button_text = button.get_text(" ", strip=True).lower() if button else ""
+    preorder_date = extract_preorder_date(soup, raw_html)
+
+    if "unavailable" in stock_classes or "out of stock" in stock_text:
+        return "out_of_stock", None, "❌ Немає в наявності"
+
+    if preorder_date is not None or "pre order" in button_text or "pre-order" in button_text or preorder_message is not None:
+        return "pre_order", preorder_date, "🟡 Попереднє замовлення"
+
+    if "in stock" in stock_text:
+        return "in_stock", None, "✅ Є в наявності"
+
+    if notify_link is not None:
+        return "out_of_stock", None, "❌ Немає в наявності"
+
+    return "unknown", None, "⚪ Статус невідомий"
+
+def check_single_product(url):
+    name = get_product_name(url)
+    for attempt in range(2):
+        try:
+            response = requests.get(url, headers=HEADERS_PARSER, timeout=15)
+            response.raise_for_status()
+            soup = BeautifulSoup(response.text, "html.parser")
+
+            state, date, status_text = detect_product_status(soup, response.text)
+            return {
+                "success": True,
+                "name": name,
+                "url": url,
+                "state": state,
+                "date": date,
+                "status_text": status_text
+            }
+        except Exception as e:
+            if attempt == 0:
+                time.sleep(1.5)
+            else:
+                return {
+                    "success": False,
+                    "name": name,
+                    "url": url,
+                    "status_text": "❌ Помилка завантаження"
+                }
+
+def check_all_products_and_format_report():
+    products = get_products_from_github()
     if not products:
         return "📋 <b>Список відстежуваних товарів порожній.</b>\nДодайте посилання через WebApp!"
 
-    report_lines = ["📦 <b>Поточний статус товарів на NKON:</b>\n"]
-    
+    report_lines = ["📦 <b>Поточний статус усіх товарів на NKON:</b>\n"]
+
     for url in products:
-        try:
-            # Використовуємо безкоштовний публічний проксі для обходу блокування 403 на Render
-            proxy_url = f"https://api.allorigins.win/get?url={requests.utils.quote(url)}"
-            res = requests.get(proxy_url, timeout=20)
-            
-            if res.status_code != 200:
-                report_lines.append(f"❌ <b>Помилка завантаження (Код {res.status_code}):</b>\n<a href='{url}'>{url}</a>\n")
-                continue
+        res = check_single_product(url)
+        name = html.escape(res["name"])
+        url_escaped = html.escape(res["url"], quote=True)
+        status_text = html.escape(res["status_text"])
 
-            data = res.json()
-            html_content = data.get("contents", "")
-            
-            if not html_content:
-                report_lines.append(f"❌ <b>Порожня відповідь від сторінки:</b>\n<a href='{url}'>{url}</a>\n")
-                continue
+        item_lines = [f"<b>{name}</b>", f"Статус: {status_text}"]
 
-            soup = BeautifulSoup(html_content, 'html.parser')
+        if res.get("date"):
+            date_str = html.escape(res["date"])
+            item_lines.append(f"📅 Дата відвантаження: <b>{date_str}</b>")
 
-            # Назва товару
-            title_el = soup.select_one('h1.page-title span') or soup.select_one('h1.page-title') or soup.select_one('h1')
-            title = title_el.get_text(strip=True) if title_el else "Товар NKON"
-
-            # Ціна
-            price_el = soup.select_one('.price-box .price') or soup.select_one('.price') or soup.select_one('[data-price-amount]')
-            price = price_el.get_text(strip=True) if price_el else "Ціна не вказана"
-
-            # Статус наявності
-            stock_el = soup.select_one('.stock span') or soup.select_one('.stock') or soup.select_one('.availability')
-            if stock_el:
-                stock_text = stock_el.get_text(strip=True)
-                status_icon = "🟢" if any(word in stock_text.lower() for word in ["in stock", "в наявності", "available"]) else "🔴"
-            else:
-                stock_text = "В наявності"
-                status_icon = "🟢"
-
-            report_lines.append(
-                f"{status_icon} <a href='{url}'><b>{title}</b></a>\n"
-                f"💰 Ціна: <b>{price}</b>\n"
-                f"📊 Статус: {stock_text}\n"
-            )
-        except Exception as e:
-            report_lines.append(f"⚠️ Помилка перевірки: <a href='{url}'>{url}</a>\n")
+        item_lines.append(f'<a href="{url_escaped}">Відкрити товар на NKON</a>\n')
+        report_lines.append("\n".join(item_lines))
+        time.sleep(1)
 
     return "\n".join(report_lines)
 
@@ -120,8 +185,14 @@ def index():
 
 @app.route("/api/products", methods=["GET"])
 def list_products():
-    products, _ = get_products_from_github()
-    return jsonify({"products": products})
+    url_github = f"https://api.github.com/repos/{GITHUB_REPO}/contents/products.txt"
+    response = requests.get(url_github, headers=HEADERS_GITHUB)
+    if response.status_code == 200:
+        file_data = response.json()
+        content = base64.b64decode(file_data["content"]).decode("utf-8")
+        products = [line.strip() for line in content.splitlines() if line.strip()]
+        return jsonify({"products": products})
+    return jsonify({"products": []})
 
 @app.route("/api/products", methods=["POST"])
 def add_product():
@@ -130,7 +201,16 @@ def add_product():
     if not url:
         return jsonify({"success": False, "error": "Порожня адреса"}), 400
 
-    products, sha = get_products_from_github()
+    url_github = f"https://api.github.com/repos/{GITHUB_REPO}/contents/products.txt"
+    response = requests.get(url_github, headers=HEADERS_GITHUB)
+    sha = None
+    products = []
+    if response.status_code == 200:
+        file_data = response.json()
+        sha = file_data["sha"]
+        content = base64.b64decode(file_data["content"]).decode("utf-8")
+        products = [line.strip() for line in content.splitlines() if line.strip()]
+
     if url in products:
         return jsonify({"success": False, "error": "Таке посилання вже є!"}), 400
 
@@ -147,7 +227,16 @@ def delete_product():
     data = request.json
     url_to_delete = data.get("url", "").strip()
     
-    products, sha = get_products_from_github()
+    url_github = f"https://api.github.com/repos/{GITHUB_REPO}/contents/products.txt"
+    response = requests.get(url_github, headers=HEADERS_GITHUB)
+    if response.status_code != 200:
+        return jsonify({"success": False, "error": "Помилка доступу до GitHub"}), 500
+
+    file_data = response.json()
+    sha = file_data["sha"]
+    content = base64.b64decode(file_data["content"]).decode("utf-8")
+    products = [line.strip() for line in content.splitlines() if line.strip()]
+
     if url_to_delete not in products:
         return jsonify({"success": False, "error": "Посилання не знайдено"}), 404
 
@@ -170,12 +259,12 @@ def telegram_webhook():
     text = message.get("text", "")
 
     if text in ["/start", "/help"]:
-        welcome_text = "Вітаю! Натисніть кнопку нижче, щоб швидко перевірити статус усіх товарів на NKON."
+        welcome_text = "Вітаю! Натисніть кнопку нижче, щоб отримати повний звіт по всіх товарах NKON."
         send_telegram_message(chat_id, welcome_text, reply_markup=get_main_keyboard())
 
     elif text == "🔍 Перевірити всі товари":
-        send_telegram_message(chat_id, "⏳ Збираю інформацію про товари, зачекайте кілька секунд...")
-        report = check_stock_and_format_report()
+        send_telegram_message(chat_id, "⏳ Збираю актуальну інформацію про всі товари з NKON, зачекайте хвилинку...")
+        report = check_all_products_and_format_report()
         send_telegram_message(chat_id, report, reply_markup=get_main_keyboard())
 
     return jsonify({"status": "ok"})
