@@ -4,6 +4,7 @@ import json
 import base64
 import html
 import time
+import threading
 import requests
 from bs4 import BeautifulSoup
 from flask import Flask, render_template, request, jsonify
@@ -125,7 +126,6 @@ def check_single_product(url):
     name = get_product_name(url)
     for attempt in range(2):
         try:
-            # Використовуємо проксі-обхідник для Render, щоб уникнути блокування Cloudflare (403/522)
             proxy_url = f"https://api.allorigins.win/get?url={requests.utils.quote(url)}"
             response = requests.get(proxy_url, timeout=25)
             response.raise_for_status()
@@ -145,9 +145,9 @@ def check_single_product(url):
                 "date": date,
                 "status_text": status_text
             }
-        except Exception as e:
+        except Exception:
             if attempt == 0:
-                time.sleep(2)
+                time.sleep(1.5)
             else:
                 return {
                     "success": False,
@@ -156,10 +156,13 @@ def check_single_product(url):
                     "status_text": "❌ Помилка завантаження"
                 }
 
-def check_all_products_and_format_report():
+def process_and_send_report(chat_id):
+    send_telegram_message(chat_id, "⏳ Збираю актуальну інформацію про всі товари з NKON, зачекайте хвилинку...")
+    
     products = get_products_from_github()
     if not products:
-        return "📋 <b>Список відстежуваних товарів порожній.</b>\nДодайте посилання через WebApp!"
+        send_telegram_message(chat_id, "📋 <b>Список відстежуваних товарів порожній.</b>\nДодайте посилання через WebApp!", reply_markup=get_main_keyboard())
+        return
 
     report_lines = ["📦 <b>Поточний статус усіх товарів на NKON:</b>\n"]
 
@@ -177,9 +180,10 @@ def check_all_products_and_format_report():
 
         item_lines.append(f'<a href="{url_escaped}">Відкрити товар на NKON</a>\n')
         report_lines.append("\n".join(item_lines))
-        time.sleep(1)
+        time.sleep(0.5)
 
-    return "\n".join(report_lines)
+    report_text = "\n".join(report_lines)
+    send_telegram_message(chat_id, report_text, reply_markup=get_main_keyboard())
 
 @app.route("/")
 def index():
@@ -265,9 +269,8 @@ def telegram_webhook():
         send_telegram_message(chat_id, welcome_text, reply_markup=get_main_keyboard())
 
     elif text == "🔍 Перевірити всі товари":
-        send_telegram_message(chat_id, "⏳ Збираю актуальну інформацію про всі товари з NKON, зачекайте хвилинку...")
-        report = check_all_products_and_format_report()
-        send_telegram_message(chat_id, report, reply_markup=get_main_keyboard())
+        # Запускаємо важкий парсинг у фоновому потоці, щоб Telegram отримав миттєву відповідь 200 OK
+        threading.Thread(target=process_and_send_report, args=(chat_id,)).start()
 
     return jsonify({"status": "ok"})
 
