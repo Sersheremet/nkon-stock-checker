@@ -37,6 +37,30 @@ TELEGRAM_MAX_LENGTH = 3500
 
 
 # ============================================================
+# АВТОМАТИЧНЕ НАЛАШТУВАННЯ МЕНЮ БОТА
+# ============================================================
+
+def setup_bot_menu():
+    if not TELEGRAM_BOT_TOKEN:
+        return
+    
+    commands_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/setMyCommands"
+    commands_payload = {
+        "commands": [
+            {"command": "check", "title": "Перевірити всі товари"},
+            {"command": "start", "title": "Головне меню"}
+        ]
+    }
+    try:
+        requests.post(commands_url, json=commands_payload, timeout=10)
+    except Exception as e:
+        print(f"Помилка встановлення команд меню: {e}")
+
+# Викликаємо налаштування при старті програми
+setup_bot_menu()
+
+
+# ============================================================
 # ДОПОМІЖНІ ФУНКЦІЇ ДЛЯ РОБОТИ З GITHUB
 # ============================================================
 
@@ -251,10 +275,10 @@ def telegram_webhook():
     text = message.get("text", "")
 
     if text in ["/start", "/help"]:
-        welcome_text = "Вітаю! Натисніть кнопку нижче, щоб отримати актуальний звіт по всіх товарах із кешу."
+        welcome_text = "Вітаю! Натисніть кнопку нижче або скористайтеся меню команд, щоб отримати актуальний звіт."
         send_telegram(chat_id, welcome_text, reply_markup=get_main_keyboard())
 
-    elif text == "🔍 Перевірити всі товари":
+    elif text in ["/check", "🔍 Перевірити всі товари"]:
         threading.Thread(target=run_report_from_cache, args=(chat_id,)).start()
 
     return jsonify({"status": "ok"})
