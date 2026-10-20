@@ -45,8 +45,14 @@ PRODUCT_NAMES = {
 
 
 # ============================================================
-# НАЗВА ТОВАРУ
+# ДОПОМІЖНІ ФУНКЦІЇ ДЛЯ URL ТА НАЗВ
 # ============================================================
+
+def clean_url(url):
+    """Видаляє UTM-мітки, параметри та якорі з URL для чистоти кешу."""
+    if not url:
+        return ""
+    return url.split("?")[0].split("#")[0].strip()
 
 def get_product_name(url):
     url_lower = url.lower()
@@ -118,13 +124,17 @@ def load_cache():
         cache = {}
 
         for url, value in raw_cache.items():
+            cleaned_url = clean_url(url)
+            if not cleaned_url:
+                continue
+
             if isinstance(value, str):
-                cache[url] = {
+                cache[cleaned_url] = {
                     "state": value,
                     "date": None,
                 }
             elif isinstance(value, dict):
-                cache[url] = {
+                cache[cleaned_url] = {
                     "state": value.get("state"),
                     "date": value.get("date"),
                 }
@@ -152,34 +162,40 @@ def save_cache(cache):
 
 
 # ============================================================
-# ПОШУК ДАТИ ВІДВАНТАЖЕННЯ (Універсально для EN та UA)
+# ПОШУК ДАТИ ВІДВАНТАЖЕННЯ (Універсально)
 # ============================================================
 
 def extract_preorder_date(soup, raw_html=""):
-    # Шукаємо у специфічному елементі Magento-модуля попереднього замовлення
-    element = soup.select_one(".ampreorder-observed")
-
-    if element:
-        text = element.get_text(" ", strip=True)
-        # Шукаємо дату у форматі DD-MM-YYYY незалежно від двокрапок чи пробілів
+    # 1. Шукаємо у блоці stock-sku
+    stock_sku_block = soup.select_one(".product-info-stock-sku")
+    if stock_sku_block:
+        text = stock_sku_block.get_text(" ", strip=True)
         match = re.search(r"\b\d{2}-\d{2}-\d{4}\b", text)
-
         if match:
             date = match.group(0)
-            print(f"  DEBUG: Дату знайдено в елементі ampreorder-observed: {date}")
+            print(f"  DEBUG: Дату знайдено в stock-sku: {date}")
             return date
 
-    # Резервний пошук по всьому HTML, якщо є ключові слова передзамовлення
+    # 2. Шукаємо у класі ampreorder-observed
+    element = soup.select_one(".ampreorder-observed")
+    if element:
+        text = element.get_text(" ", strip=True)
+        match = re.search(r"\b\d{2}-\d{2}-\d{4}\b", text)
+        if match:
+            date = match.group(0)
+            print(f"  DEBUG: Дату знайдено в ampreorder-observed: {date}")
+            return date
+
+    # 3. Резервний пошук у всьому HTML за наявності ключових слів передзамовлення
     if raw_html and re.search(
-        r"pre-order|попереднє замовлення|estimated shipping date|орієнтовна дата доставки",
+        r"pre-order|попереднє замовлення|estimated shipping date|орієнтовна дата доставки|дорозі до нас",
         raw_html,
         re.IGNORECASE,
     ):
         dates = re.findall(r"\b\d{2}-\d{2}-\d{4}\b", raw_html)
-
         if dates:
             date = dates[0]
-            print(f"  DEBUG: Дату передзамовлення знайдено в HTML (резерв): {date}")
+            print(f"  DEBUG: Дату знайдено в HTML (резерв): {date}")
             return date
 
     print("  DEBUG: Дату передзамовлення не знайдено.")
@@ -194,8 +210,6 @@ def detect_product_status(soup, url, raw_html=""):
     stock = soup.select_one(".product-info-stock-sku .stock")
     button = soup.select_one("#product-addtocart-button")
     notify_link = soup.select_one(".product.alert.stock a.action.alert")
-    preorder_message = soup.select_one(".preorder-message-block")
-    ampreorder_elem = soup.select_one(".ampreorder-observed")
 
     stock_text = stock.get_text(" ", strip=True).lower() if stock else ""
     stock_classes = stock.get("class", []) if stock else []
@@ -203,24 +217,15 @@ def detect_product_status(soup, url, raw_html=""):
 
     preorder_date = extract_preorder_date(soup, raw_html)
 
-    print(f"  DEBUG: stock text = {stock_text!r}")
-    print(f"  DEBUG: stock classes = {stock_classes}")
-    print(f"  DEBUG: button text = {button_text!r}")
-    print("  DEBUG: preorder message found =", preorder_message is not None)
-
-    # 1. АБСОЛЮТНИЙ ПРІОРИТЕТ №1: Якщо є елемент з датою передзамовлення або дата знайдена — це 100% передзамовлення
-    if ampreorder_elem is not None or preorder_date is not None or preorder_message is not None:
+    # ПРІОРИТЕТ №1: Якщо виявлено дату у форматі ДД-ММ-РРРР або блок передзамовлення — це 100% pre_order
+    if preorder_date is not None or "preorder-message-block" in raw_html or "попереднього замовлення" in raw_html.lower():
         return "pre_order", preorder_date
 
-    # 2. ПРІОРИТЕТ №2: Кнопка або текст містять ознаки передзамовлення
-    if (
-        "pre order" in button_text
-        or "pre-order" in button_text
-        or "попереднє замовлення" in raw_html.lower()
-    ):
+    # ПРІОРИТЕТ №2: Кнопка або текст містять ознаки передзамовлення
+    if "pre order" in button_text or "pre-order" in button_text:
         return "pre_order", preorder_date
 
-    # 3. ПРІОРИТЕТ №3: Товар точно відсутній
+    # ПРІОРИТЕТ №3: Товар точно відсутній
     if (
         "unavailable" in stock_classes
         or "out of stock" in stock_text
@@ -229,7 +234,7 @@ def detect_product_status(soup, url, raw_html=""):
     ):
         return "out_of_stock", None
 
-    # 4. ПРІОРИТЕТ №4: Товар у наявності
+    # ПРІОРИТЕТ №4: Товар у наявності
     if (
         "available" in stock_classes
         or "in stock" in stock_text
@@ -246,11 +251,12 @@ def detect_product_status(soup, url, raw_html=""):
 # ============================================================
 
 def check_product(url):
-    name = get_product_name(url)
+    clean_target_url = clean_url(url)
+    name = get_product_name(clean_target_url)
 
     for attempt in range(REQUEST_RETRIES + 1):
         try:
-            response = requests.get(url, headers=HEADERS, timeout=REQUEST_TIMEOUT)
+            response = requests.get(clean_target_url, headers=HEADERS, timeout=REQUEST_TIMEOUT)
             response.raise_for_status()
 
             soup = BeautifulSoup(response.text, "html.parser")
@@ -258,14 +264,14 @@ def check_product(url):
             if not soup.select_one(".product-info-price"):
                 raise ValueError("Не знайдено .product-info-price. Можливо, сторінка інша.")
 
-            state, date = detect_product_status(soup, url, response.text)
+            state, date = detect_product_status(soup, clean_target_url, response.text)
 
             if state == "unknown":
                 print("  ⚠️ Результат неоднозначний. Кеш не оновлюємо.")
                 return {
                     "success": False,
                     "name": name,
-                    "url": url,
+                    "url": clean_target_url,
                     "state": "unknown",
                     "date": None,
                 }
@@ -283,7 +289,7 @@ def check_product(url):
             return {
                 "success": True,
                 "name": name,
-                "url": url,
+                "url": clean_target_url,
                 "state": state,
                 "date": date,
                 "status_text": status_text,
@@ -298,7 +304,7 @@ def check_product(url):
     return {
         "success": False,
         "name": name,
-        "url": url,
+        "url": clean_target_url,
         "state": "error",
         "date": None,
     }
@@ -362,11 +368,11 @@ def main():
     with open(PRODUCTS_FILE, "r", encoding="utf-8") as file:
         urls = []
         for line in file:
-            url = line.strip()
-            if not url or url.startswith("#"):
+            cleaned = clean_url(line)
+            if not cleaned or cleaned.startswith("#"):
                 continue
-            if url not in urls:
-                urls.append(url)
+            if cleaned not in urls:
+                urls.append(cleaned)
 
     if not urls:
         print("⚠️ У products.txt немає URL для перевірки.")
@@ -386,11 +392,12 @@ def main():
             if not result["success"]:
                 continue
 
-            old_record = cache.get(url)
+            target_url = result["url"]
+            old_record = cache.get(target_url)
 
             if old_record is None:
                 print("  ℹ️ Перший запис у кеш — без сповіщення.")
-                new_cache[url] = {
+                new_cache[target_url] = {
                     "state": result["state"],
                     "date": result["date"],
                 }
@@ -419,7 +426,7 @@ def main():
                 print(f"  🔄 Статус змінився: {old_state} → {new_state}")
                 changes.append({
                     "name": result["name"],
-                    "url": url,
+                    "url": target_url,
                     "status_text": result["status_text"],
                     "date": new_date,
                     "change_type": "status_changed",
@@ -428,7 +435,7 @@ def main():
                 print(f"  📅 Дата змінилася: {old_date} → {new_date}")
                 changes.append({
                     "name": result["name"],
-                    "url": url,
+                    "url": target_url,
                     "status_text": "🟡 Попереднє замовлення",
                     "old_date": old_date,
                     "date": new_date,
@@ -437,7 +444,7 @@ def main():
             else:
                 print("  ✓ Змін статусу або дати не виявлено.")
 
-            new_cache[url] = {
+            new_cache[target_url] = {
                 "state": new_state,
                 "date": new_date,
             }
