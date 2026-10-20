@@ -22,6 +22,8 @@ HEADERS_GITHUB = {
 }
 
 PRODUCT_NAMES = {
+    "deye-sun-12k-sg02lp1": "Deye SUN-12K SG02 (однофазний 12 кВт)",
+    "deye-sun-12k-sg01hp3": "Deye SUN-12K SG01 (трифазний HV 12 кВт)",
     "deye-sun-12k": "Deye SUN-12K (інвертор 12 кВт)",
     "deye-se-f16": "Deye SE-F16-C (батарея 16 кВт·год)",
     "deye-se-f5-pro": "Deye SE-F5 Pro-C (батарея 5.12 кВт·год)",
@@ -56,27 +58,31 @@ def setup_bot_menu():
     except Exception as e:
         print(f"Помилка встановлення команд меню: {e}")
 
-# Викликаємо налаштування при старті програми
 setup_bot_menu()
 
 
 # ============================================================
-# ДОПОМІЖНІ ФУНКЦІЇ ДЛЯ РОБОТИ З GITHUB
+# ДОПОМІЖНІ ФУНКЦІЇ ДЛЯ РОБОТИ З GITHUB ТА URL
 # ============================================================
+
+def clean_url(url):
+    """Видаляє UTM-мітки, параметри та якорі з URL."""
+    if not url:
+        return ""
+    return url.split("?")[0].split("#")[0].strip()
 
 def get_product_name(url):
     url_lower = url.lower()
     
-    # 1. Шукаємо у готовому словнику
-    for key, name in PRODUCT_NAMES.items():
+    # Сортуємо ключі за довжиною (від найдовших до найкоротших)
+    sorted_keys = sorted(PRODUCT_NAMES.keys(), key=len, reverse=True)
+    for key in sorted_keys:
         if key in url_lower:
-            return name
+            return PRODUCT_NAMES[key]
 
-    # 2. Якщо товару немає в словнику — формуємо охайну назву з URL
     try:
         slug = url.split('/')[-1].split('?')[0].replace('.html', '')
-        clean_name = slug.replace('-', ' ').title()
-        return clean_name
+        return slug.replace('-', ' ').title()
     except Exception:
         return url
 
@@ -86,8 +92,8 @@ def get_products_from_github():
     if response.status_code == 200:
         file_data = response.json()
         content = base64.b64decode(file_data["content"]).decode("utf-8")
-        products = [line.strip() for line in content.splitlines() if line.strip() and not line.strip().startswith("#")]
-        return products
+        products = [clean_url(line) for line in content.splitlines() if line.strip() and not line.strip().startswith("#")]
+        return [p for p in products if p]
     return []
 
 def get_cache_from_github():
@@ -97,7 +103,12 @@ def get_cache_from_github():
         file_data = response.json()
         content = base64.b64decode(file_data["content"]).decode("utf-8")
         try:
-            return json.loads(content)
+            raw_cache = json.loads(content)
+            # Нормалізуємо ключі кешу (очищаємо від UTM)
+            cleaned_cache = {}
+            for k, v in raw_cache.items():
+                cleaned_cache[clean_url(k)] = v
+            return cleaned_cache
         except Exception:
             return {}
     return {}
@@ -150,9 +161,10 @@ def get_main_keyboard():
 # ============================================================
 
 def format_product_message(url, cache_data):
-    name = get_product_name(url)
+    clean_target_url = clean_url(url)
+    name = get_product_name(clean_target_url)
     escaped_name = html.escape(name)
-    escaped_url = html.escape(url, quote=True)
+    escaped_url = html.escape(clean_target_url, quote=True)
 
     if not cache_data:
         status_text = "⚪ Статус невідомий"
@@ -192,8 +204,9 @@ def run_report_from_cache(chat_id):
     current_message = heading
 
     for url in products:
-        cache_item = cache.get(url, {})
-        block = format_product_message(url, cache_item) + "\n\n"
+        clean_target_url = clean_url(url)
+        cache_item = cache.get(clean_target_url, {})
+        block = format_product_message(clean_target_url, cache_item) + "\n\n"
 
         if len(current_message) + len(block) > TELEGRAM_MAX_LENGTH and current_message != heading:
             send_telegram(chat_id, current_message.strip())
@@ -221,7 +234,7 @@ def list_products():
 @app.route("/api/products", methods=["POST"])
 def add_product():
     data = request.json
-    url = data.get("url", "").strip()
+    url = clean_url(data.get("url", ""))
     if not url:
         return jsonify({"success": False, "error": "Порожня адреса"}), 400
 
@@ -233,7 +246,7 @@ def add_product():
         file_data = response.json()
         sha = file_data["sha"]
         content = base64.b64decode(file_data["content"]).decode("utf-8")
-        products = [line.strip() for line in content.splitlines() if line.strip()]
+        products = [clean_url(line) for line in content.splitlines() if line.strip()]
 
     if url in products:
         return jsonify({"success": False, "error": "Таке посилання вже є!"}), 400
@@ -245,7 +258,7 @@ def add_product():
 @app.route("/api/products", methods=["DELETE"])
 def delete_product():
     data = request.json
-    url_to_delete = data.get("url", "").strip()
+    url_to_delete = clean_url(data.get("url", ""))
 
     url_github = f"https://api.github.com/repos/{GITHUB_REPO}/contents/products.txt"
     response = requests.get(url_github, headers=HEADERS_GITHUB)
@@ -255,7 +268,7 @@ def delete_product():
     file_data = response.json()
     sha = file_data["sha"]
     content = base64.b64decode(file_data["content"]).decode("utf-8")
-    products = [line.strip() for line in content.splitlines() if line.strip()]
+    products = [clean_url(line) for line in content.splitlines() if line.strip()]
 
     if url_to_delete not in products:
         return jsonify({"success": False, "error": "Посилання не знайдено"}), 404
