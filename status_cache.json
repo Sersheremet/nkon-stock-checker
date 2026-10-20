@@ -39,15 +39,15 @@
     "state": "in_stock",
     "date": null
   },
-  "https://www.nkon.nl/ua/deye-sun-80k-sg01hp3-eu-50kw-3-fase-hybride-hv-omvormer.html?_gl=1*bdt8fq*_up*MQ..*_gs*MQ..&gclid=CjwKCAjw_9bWBhBGEiwAomyTIpXxPgAQQ35AZ-XLUSSsMggZH7bQmtIrFCIQltYG1OXvmq4ip-tKihoCD9sQAvD_BwE": {
+  "https://www.nkon.nl/ua/deye-sun-80k-sg01hp3-eu-50kw-3-fase-hybride-hv-omvormer.html": {
     "state": "in_stock",
     "date": null
   },
-  "https://www.nkon.nl/ua/deye-15kwlp3-lv-hybride-omvormer.html?_gl=1*tkrc54*_up*MQ..*_gs*MQ..&gclid=CjwKCAjw_9bWBhBGEiwAomyTIpXxPgAQQ35AZ-XLUSSsMggZH7bQmtIrFCIQltYG1OXvmq4ip-tKihoCD9sQAvD_BwE": {
-    "state": "in_stock",
-    "date": null
+  "https://www.nkon.nl/ua/deye-15kwlp3-lv-hybride-omvormer.html": {
+    "state": "pre_order",
+    "date": "30-10-2026"
   },
-  "https://www.nkon.nl/ua/deye-sun-12k-sg01hp3-eu-dm2.html?_gl=1*tkrc54*_up*MQ..*_gs*MQ..&gclid=CjwKCAjw_9bWBhBGEiwAomyTIpXxPgAQQ35AZ-XLUSSsMggZH7bQmtIrFCIQltYG1OXvmq4ip-tKihoCD9sQAvD_BwE": {
+  "https://www.nkon.nl/ua/deye-sun-12k-sg01hp3-eu-dm2.html": {
     "state": "out_of_stock",
     "date": null
   }
