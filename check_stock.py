@@ -184,7 +184,7 @@ def extract_preorder_date(soup, raw_html=""):
 
 
 # ============================================================
-# ВИЗНАЧЕННЯ СТАТУСУ ТОВАРУ (Універсально для EN та UA)
+# ВИЗНАЧЕННЯ СТАТУСУ ТОВАРУ (Виправлений пріоритет)
 # ============================================================
 
 def detect_product_status(soup, url, raw_html=""):
@@ -205,7 +205,7 @@ def detect_product_status(soup, url, raw_html=""):
     print(f"  DEBUG: button text = {button_text!r}")
     print("  DEBUG: preorder message found =", preorder_message is not None)
 
-    # 1. Попереднє замовлення (якщо є елемент з датою попереднього замовлення або відповідний текст/кнопка)
+    # 1. ГОЛОВНИЙ ПРІОРИТЕТ: Попереднє замовлення (має вищий пріоритет, ніж наявність)
     if (
         ampreorder_elem is not None
         or preorder_date is not None
