@@ -8,10 +8,6 @@ from flask import Flask, render_template, request, jsonify
 
 app = Flask(__name__)
 
-# ============================================================
-# НАЛАШТУВАННЯ ТА ЗМІННІ ОТОЧЕННЯ
-# ============================================================
-
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 GITHUB_REPO = os.getenv("GITHUB_REPO")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -25,6 +21,8 @@ PRODUCT_NAMES = {
     "deye-sun-12k-sg02lp1": "Deye SUN-12K SG02 (однофазний 12 кВт)",
     "deye-sun-12k-sg01hp3": "Deye SUN-12K SG01 (трифазний HV 12 кВт)",
     "deye-sun-12k": "Deye SUN-12K (інвертор 12 кВт)",
+    "deye-sun-80k": "Deye SUN-80K (трифазний HV 80 кВт)",
+    "deye-15kwlp3": "Deye 15kW LP3 (низьковольтний інвертор)",
     "deye-se-f16": "Deye SE-F16-C (батарея 16 кВт·год)",
     "deye-se-f5-pro": "Deye SE-F5 Pro-C (батарея 5.12 кВт·год)",
     "deye-sun-8k": "Deye SUN-8K (інвертор 8 кВт)",
@@ -33,14 +31,11 @@ PRODUCT_NAMES = {
     "deye-se-f12": "Deye SE-F12-C (батарея)",
     "sun-5k-sg06": "Deye SUN-5K SG06 (інвертор 5 кВт)",
     "felicity-fla48314": "Felicity FLA48314 (батарея 16 кВт·год)",
+    "felicity-flb48314": "Felicity 16 кВт·год (HV батарея)",
 }
 
 TELEGRAM_MAX_LENGTH = 3500
 
-
-# ============================================================
-# АВТОМАТИЧНЕ НАЛАШТУВАННЯ МЕНЮ БОТА
-# ============================================================
 
 def setup_bot_menu():
     if not TELEGRAM_BOT_TOKEN:
@@ -60,20 +55,13 @@ def setup_bot_menu():
 setup_bot_menu()
 
 
-# ============================================================
-# ДОПОМІЖНІ ФУНКЦІЇ ДЛЯ РОБОТИ З GITHUB ТА URL
-# ============================================================
-
 def clean_url(url):
-    """Видаляє UTM-мітки, параметри та якорі з URL."""
     if not url:
         return ""
     return url.split("?")[0].split("#")[0].strip()
 
 def get_product_name(url):
     url_lower = url.lower()
-    
-    # Сортуємо ключі за довжиною (від найдовших до найкоротших)
     sorted_keys = sorted(PRODUCT_NAMES.keys(), key=len, reverse=True)
     for key in sorted_keys:
         if key in url_lower:
@@ -115,29 +103,17 @@ def save_products_to_github(products, sha, commit_message):
     url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/products.txt"
     new_content = "\n".join(products) + ("\n" if products else "")
     encoded_content = base64.b64encode(new_content.encode("utf-8")).decode("utf-8")
-    
-    payload = {
-        "message": commit_message,
-        "content": encoded_content,
-        "sha": sha
-    }
+    payload = {"message": commit_message, "content": encoded_content, "sha": sha}
     response = requests.put(url, headers=HEADERS_GITHUB, json=payload)
     return response.status_code in [200, 201]
 
 def send_telegram(chat_id, message, reply_markup=None):
     if not TELEGRAM_BOT_TOKEN:
         return False
-
     api_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": chat_id,
-        "text": message,
-        "parse_mode": "HTML",
-        "disable_web_page_preview": True,
-    }
+    payload = {"chat_id": chat_id, "text": message, "parse_mode": "HTML", "disable_web_page_preview": True}
     if reply_markup:
         payload["reply_markup"] = reply_markup
-
     try:
         response = requests.post(api_url, json=payload, timeout=15)
         return response.status_code == 200
@@ -146,17 +122,8 @@ def send_telegram(chat_id, message, reply_markup=None):
         return False
 
 def get_main_keyboard():
-    return {
-        "keyboard": [
-            [{"text": "🔍 Перевірити всі товари"}]
-        ],
-        "resize_keyboard": True
-    }
+    return {"keyboard": [[{"text": "🔍 Перевірити всі товари"}]], "resize_keyboard": True}
 
-
-# ============================================================
-# ФОРМУВАННЯ ЗВІТУ З status_cache.json
-# ============================================================
 
 def format_product_message(url, cache_data):
     clean_target_url = clean_url(url)
@@ -165,7 +132,7 @@ def format_product_message(url, cache_data):
     escaped_url = html.escape(clean_target_url, quote=True)
 
     if not cache_data:
-        status_text = "⚪ Статус невідомий"
+        state = "unknown"
         date = None
         price = None
         shipping = None
@@ -175,30 +142,28 @@ def format_product_message(url, cache_data):
         price = cache_data.get("price")
         shipping = cache_data.get("shipping")
 
-        status_texts = {
-            "in_stock": "✅ Є в наявності",
-            "out_of_stock": "❌ Немає в наявності",
-            "pre_order": "🟡 Попереднє замовлення",
-        }
-        status_text = status_texts.get(state, "⚪ Статус невідомий")
+    status_emojis = {"in_stock": "✅", "out_of_stock": "❌", "pre_order": "🟡"}
+    emoji = status_emojis.get(state, "⚪")
+
+    parts = []
+    if price:
+        parts.append(f"💰 <b>{html.escape(price)}</b>")
+    if shipping:
+        ship_match = re.search(r"€[\d.,]+", shipping)
+        ship_str = ship_match.group(0) if ship_match else shipping
+        parts.append(f"📦 {ship_str}")
+    if date:
+        parts.append(f"📅 <b>{html.escape(date)}</b>")
+
+    details_line = " | ".join(parts) if parts else "Статус уточнюється"
 
     lines = [
-        f"<b>{escaped_name}</b>",
-        f"Статус: {status_text}",
+        f"{emoji} <b>{escaped_name}</b>",
+        details_line,
+        f'<a href="{escaped_url}">🔗 Відкрити на NKON</a>'
     ]
-
-    if price:
-        lines.append(f"💰 Ціна: <b>{html.escape(price)}</b>")
-
-    if shipping:
-        lines.append(f"📦 {html.escape(shipping)}")
-
-    if date:
-        escaped_date = html.escape(date)
-        lines.append(f"📅 Очікувана дата відвантаження: <b>{escaped_date}</b>")
-
-    lines.append(f'<a href="{escaped_url}">Відкрити товар на NKON</a>')
     return "\n".join(lines)
+
 
 def run_report_from_cache(chat_id):
     products = get_products_from_github()
@@ -207,8 +172,7 @@ def run_report_from_cache(chat_id):
         return
 
     cache = get_cache_from_github()
-
-    heading = "📦 <b>Поточний статус усіх товарів NKON</b> (з кешу)\n\n"
+    heading = "📦 <b>Статус товарів NKON</b>\n\n"
     current_message = heading
 
     for url in products:
@@ -226,18 +190,13 @@ def run_report_from_cache(chat_id):
         send_telegram(chat_id, current_message.strip(), reply_markup=get_main_keyboard())
 
 
-# ============================================================
-# FLASK МАРШРУТИ ТА WEBHOOK
-# ============================================================
-
 @app.route("/")
 def index():
     return render_template("index.html")
 
 @app.route("/api/products", methods=["GET"])
 def list_products():
-    products = get_products_from_github()
-    return jsonify({"products": products})
+    return jsonify({"products": get_products_from_github()})
 
 @app.route("/api/products", methods=["POST"])
 def add_product():
@@ -248,8 +207,7 @@ def add_product():
 
     url_github = f"https://api.github.com/repos/{GITHUB_REPO}/contents/products.txt"
     response = requests.get(url_github, headers=HEADERS_GITHUB)
-    sha = None
-    products = []
+    sha, products = None, []
     if response.status_code == 200:
         file_data = response.json()
         sha = file_data["sha"]
@@ -298,11 +256,10 @@ def telegram_webhook():
     if text in ["/start", "/help"]:
         welcome_text = "Вітаю! Натисніть кнопку нижче або скористайтеся меню команд, щоб отримати актуальний звіт."
         send_telegram(chat_id, welcome_text, reply_markup=get_main_keyboard())
-
     elif text in ["/check", "🔍 Перевірити всі товари"]:
         threading.Thread(target=run_report_from_cache, args=(chat_id,)).start()
 
     return jsonify({"status": "ok"})
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    app.run(host="0.0.0.0", port5000)
