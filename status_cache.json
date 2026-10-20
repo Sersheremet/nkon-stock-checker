@@ -2,66 +2,79 @@
   "https://www.nkon.nl/novat/deye-sun-5k-sg05lp1-eu-5kw-1-fase-hybride-lv-omvormer.html": {
     "state": "out_of_stock",
     "date": null,
-    "price": "33 370,24 ₴"
+    "price": "33 370,24 ₴",
+    "shipping": "Вартість доставки в Україну: €8.61 (1 товар)"
   },
   "https://www.nkon.nl/novat/sun-5k-sg06lp1-eu-bm2.html": {
     "state": "in_stock",
     "date": null,
-    "price": "33 370,24 ₴"
+    "price": "33 370,24 ₴",
+    "shipping": "Вартість доставки в Україну: €0.00 (1 товар)"
   },
   "https://www.nkon.nl/novat/deye-sun-6k-sg0lp1-eu-am2-p-6kw-1-fase-hybride-lv-omvormer.html": {
     "state": "pre_order",
     "date": "20-11-2026",
-    "price": "34 887,18 ₴"
+    "price": "34 887,18 ₴",
+    "shipping": "Вартість доставки в Україну: €0.00 (1 товар)"
   },
   "https://www.nkon.nl/novat/deye-sun-8k-sg05lp1-eu-8kw-1-fase-hybride-lv-omvormer.html": {
     "state": "pre_order",
     "date": "16-11-2026",
-    "price": "46 264,26 ₴"
+    "price": "46 264,26 ₴",
+    "shipping": "Вартість доставки в Україну: €0.00 (1 товар)"
   },
   "https://www.nkon.nl/novat/deye-sun-12k-sg02lp1-eu-12kw-1-fase-hybride-lv-omvormer.html": {
     "state": "out_of_stock",
     "date": null,
-    "price": "60 675,23 ₴"
+    "price": "60 675,23 ₴",
+    "shipping": "Вартість доставки в Україну: €23.76 (1 товар)"
   },
   "https://www.nkon.nl/novat/deye-se-f5-pro-c-51-2v-5-12kwh-thuisbatterij.html": {
     "state": "pre_order",
     "date": "06-11-2026",
-    "price": "33 370,24 ₴"
+    "price": "33 370,24 ₴",
+    "shipping": "Вартість доставки в Україну: €28.80 (1 товар)"
   },
   "https://www.nkon.nl/novat/deye-se-f12-c.html": {
     "state": "pre_order",
     "date": "06-11-2026",
-    "price": "63 203,47 ₴"
+    "price": "63 203,47 ₴",
+    "shipping": "Вартість доставки в Україну: €38.90 (1 товар)"
   },
   "https://www.nkon.nl/novat/deye-se-f16-c.html": {
     "state": "pre_order",
     "date": "06-11-2026",
-    "price": "79 181,95 ₴"
+    "price": "79 181,95 ₴",
+    "shipping": "Вартість доставки в Україну: €49.52 (1 товар)"
   },
   "https://www.nkon.nl/novat/felicity-fla48314-eu-16kwh.html": {
     "state": "in_stock",
     "date": null,
-    "price": "76 603,14 ₴"
+    "price": "76 603,14 ₴",
+    "shipping": "Вартість доставки в Україну: €0.00 (1 товар)"
   },
   "https://www.nkon.nl/novat/felicity-flb48314tg1-h-51-2v-16kwh-thuisbatterij.html": {
     "state": "in_stock",
     "date": null,
-    "price": "80 698,89 ₴"
+    "price": "80 698,89 ₴",
+    "shipping": "Вартість доставки в Україну: €0.00 (1 товар)"
   },
   "https://www.nkon.nl/ua/deye-sun-80k-sg01hp3-eu-50kw-3-fase-hybride-hv-omvormer.html": {
     "state": "in_stock",
     "date": null,
-    "price": "240 180,27 ₴"
+    "price": "240 180,27 ₴",
+    "shipping": "Вартість доставки в Україну: €65.40 (1 товар)"
   },
   "https://www.nkon.nl/ua/deye-15kwlp3-lv-hybride-omvormer.html": {
     "state": "pre_order",
     "date": "30-10-2026",
-    "price": "80 901,15 ₴"
+    "price": "80 901,15 ₴",
+    "shipping": "Вартість доставки в Україну: €33.54 (1 товар)"
   },
   "https://www.nkon.nl/ua/deye-sun-12k-sg01hp3-eu-dm2.html": {
     "state": "out_of_stock",
     "date": null,
-    "price": "46 517,09 ₴"
+    "price": "46 517,09 ₴",
+    "shipping": "Вартість доставки в Україну: €16.80 (1 товар)"
   }
 }
