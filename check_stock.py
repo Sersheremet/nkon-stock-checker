@@ -152,21 +152,24 @@ def save_cache(cache):
 
 
 # ============================================================
-# ПОШУК ДАТИ ВІДВАНТАЖЕННЯ (Універсально)
+# ПОШУК ДАТИ ВІДВАНТАЖЕННЯ (Універсально для EN та UA)
 # ============================================================
 
 def extract_preorder_date(soup, raw_html=""):
+    # Шукаємо у специфічному елементі Magento-модуля попереднього замовлення
     element = soup.select_one(".ampreorder-observed")
 
     if element:
         text = element.get_text(" ", strip=True)
+        # Шукаємо дату у форматі DD-MM-YYYY незалежно від двокрапок чи пробілів
         match = re.search(r"\b\d{2}-\d{2}-\d{4}\b", text)
 
         if match:
             date = match.group(0)
-            print(f"  DEBUG: Дату знайдено в елементі: {date}")
+            print(f"  DEBUG: Дату знайдено в елементі ampreorder-observed: {date}")
             return date
 
+    # Резервний пошук по всьому HTML, якщо є ключові слова передзамовлення
     if raw_html and re.search(
         r"pre-order|попереднє замовлення|estimated shipping date|орієнтовна дата доставки",
         raw_html,
@@ -176,7 +179,7 @@ def extract_preorder_date(soup, raw_html=""):
 
         if dates:
             date = dates[0]
-            print(f"  DEBUG: Дату передзамовлення знайдено в HTML: {date}")
+            print(f"  DEBUG: Дату передзамовлення знайдено в HTML (резерв): {date}")
             return date
 
     print("  DEBUG: Дату передзамовлення не знайдено.")
@@ -184,7 +187,7 @@ def extract_preorder_date(soup, raw_html=""):
 
 
 # ============================================================
-# ВИЗНАЧЕННЯ СТАТУСУ ТОВАРУ (Виправлений пріоритет)
+# ВИЗНАЧЕННЯ СТАТУСУ ТОВАРУ
 # ============================================================
 
 def detect_product_status(soup, url, raw_html=""):
@@ -205,18 +208,19 @@ def detect_product_status(soup, url, raw_html=""):
     print(f"  DEBUG: button text = {button_text!r}")
     print("  DEBUG: preorder message found =", preorder_message is not None)
 
-    # 1. ГОЛОВНИЙ ПРІОРИТЕТ: Попереднє замовлення (має вищий пріоритет, ніж наявність)
+    # 1. АБСОЛЮТНИЙ ПРІОРИТЕТ №1: Якщо є елемент з датою передзамовлення або дата знайдена — це 100% передзамовлення
+    if ampreorder_elem is not None or preorder_date is not None or preorder_message is not None:
+        return "pre_order", preorder_date
+
+    # 2. ПРІОРИТЕТ №2: Кнопка або текст містять ознаки передзамовлення
     if (
-        ampreorder_elem is not None
-        or preorder_date is not None
-        or "pre order" in button_text
+        "pre order" in button_text
         or "pre-order" in button_text
         or "попереднє замовлення" in raw_html.lower()
-        or preorder_message is not None
     ):
         return "pre_order", preorder_date
 
-    # 2. Немає в наявності (клас unavailable)
+    # 3. ПРІОРИТЕТ №3: Товар точно відсутній
     if (
         "unavailable" in stock_classes
         or "out of stock" in stock_text
@@ -225,7 +229,7 @@ def detect_product_status(soup, url, raw_html=""):
     ):
         return "out_of_stock", None
 
-    # 3. Є в наявності (клас available)
+    # 4. ПРІОРИТЕТ №4: Товар у наявності
     if (
         "available" in stock_classes
         or "in stock" in stock_text
