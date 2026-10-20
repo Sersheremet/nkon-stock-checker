@@ -32,7 +32,10 @@ HEADERS = {
     "Accept-Language": "en-US,en;q=0.9,uk;q=0.8,nl;q=0.7",
 }
 
+# Уточнені назви товарів (довші та специфічніші ключі розташовані нижче, але сортуються автоматично)
 PRODUCT_NAMES = {
+    "deye-sun-12k-sg02lp1": "Deye SUN-12K SG02 (однофазний 12 кВт)",
+    "deye-sun-12k-sg01hp3": "Deye SUN-12K SG01 (трифазний HV 12 кВт)",
     "deye-sun-12k": "Deye SUN-12K (інвертор 12 кВт)",
     "deye-se-f16": "Deye SE-F16-C (батарея 16 кВт·год)",
     "deye-se-f5-pro": "Deye SE-F5 Pro-C (батарея 5.12 кВт·год)",
@@ -57,10 +60,14 @@ def clean_url(url):
 def get_product_name(url):
     url_lower = url.lower()
 
-    for key, name in PRODUCT_NAMES.items():
+    # Сортуємо ключі за довжиною (від найдовших до найкоротших), 
+    # щоб спершу перевіряти більш специфічні моделі (наприклад, з урахуванням модифікації)
+    sorted_keys = sorted(PRODUCT_NAMES.keys(), key=len, reverse=True)
+    for key in sorted_keys:
         if key in url_lower:
-            return name
+            return PRODUCT_NAMES[key]
 
+    # Якщо в словнику немає — формуємо охайну назву з URL
     try:
         slug = url.split('/')[-1].split('?')[0].replace('.html', '')
         return slug.replace('-', ' ').title()
