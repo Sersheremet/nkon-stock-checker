@@ -1,4 +1,5 @@
 import os
+import re
 import json
 import base64
 import html
@@ -7,6 +8,10 @@ import requests
 from flask import Flask, render_template, request, jsonify
 
 app = Flask(__name__)
+
+# ============================================================
+# НАЛАШТУВАННЯ ТА ЗМІННІ ОТОЧЕННЯ
+# ============================================================
 
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 GITHUB_REPO = os.getenv("GITHUB_REPO")
@@ -39,6 +44,7 @@ TELEGRAM_MAX_LENGTH = 3500
 
 def setup_bot_menu():
     if not TELEGRAM_BOT_TOKEN:
+        print("⚠️ TELEGRAM_BOT_TOKEN не задано!", flush=True)
         return
     commands_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/setMyCommands"
     commands_payload = {
@@ -48,9 +54,10 @@ def setup_bot_menu():
         ]
     }
     try:
-        requests.post(commands_url, json=commands_payload, timeout=10)
+        res = requests.post(commands_url, json=commands_payload, timeout=10)
+        print(f"Налаштування меню бота: {res.status_code}", flush=True)
     except Exception as e:
-        print(f"Помилка встановлення команд меню: {e}")
+        print(f"Помилка встановлення команд меню: {e}", flush=True)
 
 setup_bot_menu()
 
@@ -81,6 +88,7 @@ def get_products_from_github():
         content = base64.b64decode(file_data["content"]).decode("utf-8")
         products = [clean_url(line) for line in content.splitlines() if line.strip() and not line.strip().startswith("#")]
         return [p for p in products if p]
+    print(f"⚠️ Помилка зчитування products.txt з GitHub: {response.status_code}", flush=True)
     return []
 
 def get_cache_from_github():
@@ -95,8 +103,10 @@ def get_cache_from_github():
             for k, v in raw_cache.items():
                 cleaned_cache[clean_url(k)] = v
             return cleaned_cache
-        except Exception:
+        except Exception as e:
+            print(f"⚠️ Помилка розбору JSON кешу: {e}", flush=True)
             return {}
+    print(f"⚠️ Помилка зчитування status_cache.json з GitHub: {response.status_code}", flush=True)
     return {}
 
 def save_products_to_github(products, sha, commit_message):
@@ -109,6 +119,7 @@ def save_products_to_github(products, sha, commit_message):
 
 def send_telegram(chat_id, message, reply_markup=None):
     if not TELEGRAM_BOT_TOKEN:
+        print("⚠️ Не задано TELEGRAM_BOT_TOKEN", flush=True)
         return False
     api_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {"chat_id": chat_id, "text": message, "parse_mode": "HTML", "disable_web_page_preview": True}
@@ -116,9 +127,11 @@ def send_telegram(chat_id, message, reply_markup=None):
         payload["reply_markup"] = reply_markup
     try:
         response = requests.post(api_url, json=payload, timeout=15)
+        if response.status_code != 200:
+            print(f"❌ Telegram API Error: {response.status_code} - {response.text}", flush=True)
         return response.status_code == 200
     except Exception as error:
-        print(f"❌ Помилка Telegram: {error}")
+        print(f"❌ Помилка надсилання в Telegram: {error}", flush=True)
         return False
 
 def get_main_keyboard():
@@ -166,28 +179,34 @@ def format_product_message(url, cache_data):
 
 
 def run_report_from_cache(chat_id):
-    products = get_products_from_github()
-    if not products:
-        send_telegram(chat_id, "⚠️ Список товарів у products.txt порожній.", reply_markup=get_main_keyboard())
-        return
+    try:
+        print(f"🏁 Запуск звіту з кешу для chat_id={chat_id}", flush=True)
+        products = get_products_from_github()
+        if not products:
+            send_telegram(chat_id, "⚠️ Список товарів у products.txt порожній.", reply_markup=get_main_keyboard())
+            return
 
-    cache = get_cache_from_github()
-    heading = "📦 <b>Статус товарів NKON</b>\n\n"
-    current_message = heading
+        cache = get_cache_from_github()
+        heading = "📦 <b>Статус товарів NKON</b>\n\n"
+        current_message = heading
 
-    for url in products:
-        clean_target_url = clean_url(url)
-        cache_item = cache.get(clean_target_url, {})
-        block = format_product_message(clean_target_url, cache_item) + "\n\n"
+        for url in products:
+            clean_target_url = clean_url(url)
+            cache_item = cache.get(clean_target_url, {})
+            block = format_product_message(clean_target_url, cache_item) + "\n\n"
 
-        if len(current_message) + len(block) > TELEGRAM_MAX_LENGTH and current_message != heading:
-            send_telegram(chat_id, current_message.strip())
-            current_message = heading
+            if len(current_message) + len(block) > TELEGRAM_MAX_LENGTH and current_message != heading:
+                send_telegram(chat_id, current_message.strip())
+                current_message = heading
 
-        current_message += block
+            current_message += block
 
-    if current_message.strip() != heading.strip():
-        send_telegram(chat_id, current_message.strip(), reply_markup=get_main_keyboard())
+        if current_message.strip() != heading.strip():
+            send_telegram(chat_id, current_message.strip(), reply_markup=get_main_keyboard())
+            print("✅ Звіт успішно надіслано в Telegram", flush=True)
+
+    except Exception as err:
+        print(f"❌ Критична помилка у run_report_from_cache: {err}", flush=True)
 
 
 @app.route("/")
@@ -246,6 +265,7 @@ def delete_product():
 @app.route("/webhook", methods=["POST"])
 def telegram_webhook():
     update = request.json
+    print(f"📥 Вебхук отримано: {update}", flush=True)
     if not update or "message" not in update:
         return jsonify({"status": "ok"})
 
