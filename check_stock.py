@@ -32,6 +32,11 @@ HEADERS = {
     "Accept-Language": "uk-UA,uk;q=0.9,en-US,en;q=0.8,nl;q=0.7",
 }
 
+# Примусово запитуємо валюту UAH (гривня) через Cookie
+COOKIES = {
+    "currency": "UAH"
+}
+
 PRODUCT_NAMES = {
     "deye-sun-12k-sg02lp1": "Deye SUN-12K SG02 (однофазний 12 кВт)",
     "deye-sun-12k-sg01hp3": "Deye SUN-12K SG01 (трифазний HV 12 кВт)",
@@ -43,6 +48,7 @@ PRODUCT_NAMES = {
     "deye-sun-6k": "Deye SUN-6K (інвертор 6 кВт)",
     "deye-se-f12": "Deye SE-F12-C (батарея)",
     "sun-5k-sg06": "Deye SUN-5K SG06 (інвертор 5 кВт)",
+    "felicity-fla48314": "Felicity FLA48314 (батарея 16 кВт·год)",
 }
 
 
@@ -55,6 +61,15 @@ def clean_url(url):
     if not url:
         return ""
     return url.split("?")[0].split("#")[0].strip()
+
+def get_ua_fetch_url(url):
+    """Перетворює посилання на українську версію (/ua/) для отримання цін."""
+    cleaned = clean_url(url)
+    if "/novat/" in cleaned:
+        return cleaned.replace("/novat/", "/ua/")
+    elif "www.nkon.nl/" in cleaned and "/ua/" not in cleaned:
+        return cleaned.replace("www.nkon.nl/", "www.nkon.nl/ua/")
+    return cleaned
 
 def get_product_name(url):
     url_lower = url.lower()
@@ -153,7 +168,6 @@ def extract_price(soup):
     price_elem = soup.select_one(".price-box .price-wrapper .price")
     if price_elem:
         price_text = price_elem.get_text(" ", strip=True)
-        # Замінюємо нерозривні пробіли на звичайні для охайного вигляду
         return price_text.replace("\xa0", " ")
     return None
 
@@ -184,7 +198,7 @@ def extract_preorder_date(soup, raw_html=""):
 # ВИЗНАЧЕННЯ СТАТУСУ ТОВАРУ
 # ============================================================
 
-def detect_product_status(soup, url, raw_html=""):
+def detect_product_status(soup, raw_html=""):
     stock = soup.select_one(".product-info-stock-sku .stock")
     button = soup.select_one("#product-addtocart-button")
     notify_link = soup.select_one(".product.alert.stock a.action.alert")
@@ -214,20 +228,27 @@ def detect_product_status(soup, url, raw_html=""):
 # ПЕРЕВІРКА ОДНОГО ТОВАРУ
 # ============================================================
 
-def check_product(url):
-    clean_target_url = clean_url(url)
+def check_product(original_url):
+    clean_target_url = clean_url(original_url)
+    fetch_url = get_ua_fetch_url(clean_target_url)
     name = get_product_name(clean_target_url)
 
     for attempt in range(REQUEST_RETRIES + 1):
         try:
-            response = requests.get(clean_target_url, headers=HEADERS, timeout=REQUEST_TIMEOUT)
+            # Передаємо cookies={"currency": "UAH"}
+            response = requests.get(
+                fetch_url, 
+                headers=HEADERS, 
+                cookies=COOKIES, 
+                timeout=REQUEST_TIMEOUT
+            )
             response.raise_for_status()
 
             soup = BeautifulSoup(response.text, "html.parser")
             if not soup.select_one(".product-info-price"):
                 raise ValueError("Не знайдено .product-info-price.")
 
-            state, date = detect_product_status(soup, clean_target_url, response.text)
+            state, date = detect_product_status(soup, response.text)
             price = extract_price(soup)
 
             if state == "unknown":
