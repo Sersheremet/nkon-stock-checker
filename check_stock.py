@@ -30,11 +30,7 @@ HEADERS = {
         "Chrome/131.0.0.0 Safari/537.36"
     ),
     "Accept-Language": "uk-UA,uk;q=0.9,en-US,en;q=0.8,nl;q=0.7",
-}
-
-# Примусово запитуємо валюту UAH (гривня) через Cookie
-COOKIES = {
-    "currency": "UAH"
+    "Referer": "https://www.nkon.nl/ua/"
 }
 
 PRODUCT_NAMES = {
@@ -63,7 +59,7 @@ def clean_url(url):
     return url.split("?")[0].split("#")[0].strip()
 
 def get_ua_fetch_url(url):
-    """Перетворює посилання на українську версію (/ua/) для отримання цін."""
+    """Перетворює посилання на українську версію (/ua/)."""
     cleaned = clean_url(url)
     if "/novat/" in cleaned:
         return cleaned.replace("/novat/", "/ua/")
@@ -225,23 +221,26 @@ def detect_product_status(soup, raw_html=""):
 
 
 # ============================================================
-# ПЕРЕВІРКА ОДНОГО ТОВАРУ
+# ПЕРЕВІРКА ОДНОГО ТОВАРУ (З ІМИТАЦІЄЮ ПЕРЕМИКАЧА ВАЛЮТИ)
 # ============================================================
 
-def check_product(original_url):
+def check_product(session, original_url):
     clean_target_url = clean_url(original_url)
     fetch_url = get_ua_fetch_url(clean_target_url)
     name = get_product_name(clean_target_url)
 
     for attempt in range(REQUEST_RETRIES + 1):
         try:
-            # Передаємо cookies={"currency": "UAH"}
-            response = requests.get(
-                fetch_url, 
-                headers=HEADERS, 
-                cookies=COOKIES, 
-                timeout=REQUEST_TIMEOUT
+            # 1. Викликаємо ендпоинт перемикання валюти Magento, щоб зафіксувати UAH у сесії
+            session.post(
+                "https://www.nkon.nl/ua/directory/currency/switch/",
+                data={"currency": "UAH", "uenc": "aHR0cHM6Ly93d3cubmtvbi5ubC91YS8,"},
+                headers={**HEADERS, "X-Requested-With": "XMLHttpRequest"},
+                timeout=10
             )
+
+            # 2. Робимо запит на сторінку товару
+            response = session.get(fetch_url, headers=HEADERS, timeout=REQUEST_TIMEOUT)
             response.raise_for_status()
 
             soup = BeautifulSoup(response.text, "html.parser")
@@ -337,9 +336,12 @@ def main():
     new_cache = {url: cache[url] for url in urls if url in cache}
     changes = []
 
+    # Використовуємо сесію для збереження кук і вибору валюти
+    session = requests.Session()
+
     for url in urls:
         try:
-            result = check_product(url)
+            result = check_product(session, url)
             if not result["success"]:
                 continue
 
