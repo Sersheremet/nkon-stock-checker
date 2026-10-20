@@ -36,6 +36,8 @@ PRODUCT_NAMES = {
     "deye-sun-12k-sg02lp1": "Deye SUN-12K SG02 (однофазний 12 кВт)",
     "deye-sun-12k-sg01hp3": "Deye SUN-12K SG01 (трифазний HV 12 кВт)",
     "deye-sun-12k": "Deye SUN-12K (інвертор 12 кВт)",
+    "deye-sun-80k": "Deye SUN-80K (трифазний HV 80 кВт)",
+    "deye-15kwlp3": "Deye 15kW LP3 (низьковольтний інвертор)",
     "deye-se-f16": "Deye SE-F16-C (батарея 16 кВт·год)",
     "deye-se-f5-pro": "Deye SE-F5 Pro-C (батарея 5.12 кВт·год)",
     "deye-sun-8k": "Deye SUN-8K (інвертор 8 кВт)",
@@ -44,6 +46,7 @@ PRODUCT_NAMES = {
     "deye-se-f12": "Deye SE-F12-C (батарея)",
     "sun-5k-sg06": "Deye SUN-5K SG06 (інвертор 5 кВт)",
     "felicity-fla48314": "Felicity FLA48314 (батарея 16 кВт·год)",
+    "felicity-flb48314": "Felicity 16 кВт·год (HV батарея)",
 }
 
 
@@ -284,7 +287,7 @@ def check_product(session, original_url):
 
 
 # ============================================================
-# ФОРМУВАННЯ ПОВІДОМЛЕНЬ ТА ЗВІТІВ
+# КОМПАКТНЕ ФОРМУВАННЯ ПОВІДОМЛЕНЬ
 # ============================================================
 
 def format_change_message(item):
@@ -293,21 +296,29 @@ def format_change_message(item):
     status_text = html.escape(item["status_text"])
     price = item.get("price")
     shipping = item.get("shipping")
+    date = item.get("date")
 
-    lines = [f"<b>{name}</b>", f"Статус: {status_text}"]
+    status_emojis = {"in_stock": "✅", "out_of_stock": "❌", "pre_order": "🟡"}
+    state_key = "in_stock" if "Є в" in status_text else ("out_of_stock" if "Немає" in status_text else "pre_order")
+    emoji = status_emojis.get(state_key, "⚪")
 
+    parts = []
     if price:
-        lines.append(f"💰 Ціна: <b>{html.escape(price)}</b>")
-
+        parts.append(f"💰 <b>{html.escape(price)}</b>")
     if shipping:
-        lines.append(f"📦 {html.escape(shipping)}")
+        ship_match = re.search(r"€[\d.,]+", shipping)
+        ship_str = ship_match.group(0) if ship_match else shipping
+        parts.append(f"📦 {ship_str}")
+    if date:
+        parts.append(f"📅 <b>{html.escape(date)}</b>")
 
-    if item.get("change_type") == "date_changed":
-        lines.append(f"📅 Дату змінено: <b>{html.escape(item['old_date'])} → {html.escape(item['date'])}</b>")
-    elif item.get("date"):
-        lines.append(f"📅 Дата відвантаження: <b>{html.escape(item['date'])}</b>")
+    details_line = " | ".join(parts) if parts else status_text
 
-    lines.append(f'<a href="{url}">Відкрити товар на NKON</a>')
+    lines = [
+        f"{emoji} <b>{name}</b>",
+        details_line,
+        f'<a href="{url}">🔗 Відкрити на NKON</a>'
+    ]
     return "\n".join(lines)
 
 
