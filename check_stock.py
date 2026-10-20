@@ -30,7 +30,6 @@ HEADERS = {
         "Chrome/131.0.0.0 Safari/537.36"
     ),
     "Accept-Language": "uk-UA,uk;q=0.9,en-US,en;q=0.8,nl;q=0.7",
-    "Referer": "https://www.nkon.nl/ua/"
 }
 
 PRODUCT_NAMES = {
@@ -133,12 +132,13 @@ def load_cache():
                 continue
 
             if isinstance(value, str):
-                cache[cleaned_url] = {"state": value, "date": None, "price": None}
+                cache[cleaned_url] = {"state": value, "date": None, "price": None, "shipping": None}
             elif isinstance(value, dict):
                 cache[cleaned_url] = {
                     "state": value.get("state"),
                     "date": value.get("date"),
                     "price": value.get("price"),
+                    "shipping": value.get("shipping"),
                 }
         return cache
     except Exception as error:
@@ -157,7 +157,7 @@ def save_cache(cache):
 
 
 # ============================================================
-# ВИДОБУВАННЯ ЦІНИ ТА ДАТИ
+# ВИДОБУВАННЯ ЦІНИ, ДОСТАВКИ ТА ДАТИ
 # ============================================================
 
 def extract_price(soup):
@@ -165,6 +165,13 @@ def extract_price(soup):
     if price_elem:
         price_text = price_elem.get_text(" ", strip=True)
         return price_text.replace("\xa0", " ")
+    return None
+
+def extract_shipping(soup):
+    shipping_elem = soup.select_one(".meest-estimated-shipping p strong")
+    if shipping_elem:
+        text = shipping_elem.get_text(" ", strip=True)
+        return text.replace("\xa0", " ")
     return None
 
 def extract_preorder_date(soup, raw_html=""):
@@ -221,7 +228,7 @@ def detect_product_status(soup, raw_html=""):
 
 
 # ============================================================
-# ПЕРЕВІРКА ОДНОГО ТОВАРУ (З ІМИТАЦІЄЮ ПЕРЕМИКАЧА ВАЛЮТИ)
+# ПЕРЕВІРКА ОДНОГО ТОВАРУ
 # ============================================================
 
 def check_product(session, original_url):
@@ -231,7 +238,6 @@ def check_product(session, original_url):
 
     for attempt in range(REQUEST_RETRIES + 1):
         try:
-            # 1. Викликаємо ендпоинт перемикання валюти Magento, щоб зафіксувати UAH у сесії
             session.post(
                 "https://www.nkon.nl/ua/directory/currency/switch/",
                 data={"currency": "UAH", "uenc": "aHR0cHM6Ly93d3cubmtvbi5ubC91YS8,"},
@@ -239,7 +245,6 @@ def check_product(session, original_url):
                 timeout=10
             )
 
-            # 2. Робимо запит на сторінку товару
             response = session.get(fetch_url, headers=HEADERS, timeout=REQUEST_TIMEOUT)
             response.raise_for_status()
 
@@ -249,9 +254,10 @@ def check_product(session, original_url):
 
             state, date = detect_product_status(soup, response.text)
             price = extract_price(soup)
+            shipping = extract_shipping(soup)
 
             if state == "unknown":
-                return {"success": False, "name": name, "url": clean_target_url, "state": "unknown", "date": None, "price": None}
+                return {"success": False, "name": name, "url": clean_target_url, "state": "unknown", "date": None, "price": None, "shipping": None}
 
             status_texts = {
                 "in_stock": "✅ Є в наявності",
@@ -266,6 +272,7 @@ def check_product(session, original_url):
                 "state": state,
                 "date": date,
                 "price": price,
+                "shipping": shipping,
                 "status_text": status_texts[state],
             }
         except Exception as error:
@@ -273,7 +280,7 @@ def check_product(session, original_url):
             if attempt < REQUEST_RETRIES:
                 time.sleep(2)
 
-    return {"success": False, "name": name, "url": clean_target_url, "state": "error", "date": None, "price": None}
+    return {"success": False, "name": name, "url": clean_target_url, "state": "error", "date": None, "price": None, "shipping": None}
 
 
 # ============================================================
@@ -285,11 +292,15 @@ def format_change_message(item):
     url = html.escape(item["url"], quote=True)
     status_text = html.escape(item["status_text"])
     price = item.get("price")
+    shipping = item.get("shipping")
 
     lines = [f"<b>{name}</b>", f"Статус: {status_text}"]
 
     if price:
         lines.append(f"💰 Ціна: <b>{html.escape(price)}</b>")
+
+    if shipping:
+        lines.append(f"📦 {html.escape(shipping)}")
 
     if item.get("change_type") == "date_changed":
         lines.append(f"📅 Дату змінено: <b>{html.escape(item['old_date'])} → {html.escape(item['date'])}</b>")
@@ -336,7 +347,6 @@ def main():
     new_cache = {url: cache[url] for url in urls if url in cache}
     changes = []
 
-    # Використовуємо сесію для збереження кук і вибору валюти
     session = requests.Session()
 
     for url in urls:
@@ -349,30 +359,39 @@ def main():
             old_record = cache.get(target_url)
 
             if old_record is None:
-                new_cache[target_url] = {"state": result["state"], "date": result["date"], "price": result["price"]}
+                new_cache[target_url] = {
+                    "state": result["state"],
+                    "date": result["date"],
+                    "price": result["price"],
+                    "shipping": result["shipping"]
+                }
                 continue
 
             old_state = old_record.get("state")
             old_date = old_record.get("date")
             old_price = old_record.get("price")
+            old_shipping = old_record.get("shipping")
 
             new_state = result["state"]
             new_date = result["date"]
             new_price = result["price"]
+            new_shipping = result["shipping"]
 
             state_changed = old_state is not None and old_state != new_state
             price_changed = old_price is not None and new_price is not None and old_price != new_price
+            shipping_changed = old_shipping is not None and new_shipping is not None and old_shipping != new_shipping
             date_changed = (old_state == "pre_order" and new_state == "pre_order" and old_date and new_date and old_date != new_date)
 
             if new_state == "pre_order" and new_date is None and old_date:
                 new_date = old_date
 
-            if state_changed or price_changed:
+            if state_changed or price_changed or shipping_changed:
                 changes.append({
                     "name": result["name"],
                     "url": target_url,
                     "status_text": result["status_text"],
                     "price": new_price,
+                    "shipping": new_shipping,
                     "date": new_date,
                     "change_type": "status_changed",
                 })
@@ -382,12 +401,18 @@ def main():
                     "url": target_url,
                     "status_text": "🟡 Попереднє замовлення",
                     "price": new_price,
+                    "shipping": new_shipping,
                     "old_date": old_date,
                     "date": new_date,
                     "change_type": "date_changed",
                 })
 
-            new_cache[target_url] = {"state": new_state, "date": new_date, "price": new_price}
+            new_cache[target_url] = {
+                "state": new_state,
+                "date": new_date,
+                "price": new_price,
+                "shipping": new_shipping
+            }
         except Exception as error:
             print(f"Помилка: {error}")
         finally:
