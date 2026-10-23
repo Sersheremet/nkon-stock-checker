@@ -42,7 +42,7 @@
     "shipping": "Вартість доставки в Україну: €38.90 (1 товар)"
   },
   "https://www.nkon.nl/novat/deye-se-f16-c.html": {
-    "state": "in_stock",
+    "state": "out_of_stock",
     "date": null,
     "price": "79 139,04 ₴",
     "shipping": "Вартість доставки в Україну: €49.52 (1 товар)"
