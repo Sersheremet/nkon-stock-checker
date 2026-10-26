@@ -29,7 +29,17 @@ HEADERS = {
         "AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/131.0.0.0 Safari/537.36"
     ),
-    "Accept-Language": "uk-UA,uk;q=0.9,en-US,en;q=0.8,nl;q=0.7",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+    "Accept-Language": "uk-UA,uk;q=0.9,en-US;q=0.8,nl;q=0.7",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Sec-Ch-Ua": '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+    "Sec-Ch-Ua-Mobile": "?0",
+    "Sec-Ch-Ua-Platform": '"Windows"',
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "same-origin",
+    "Sec-Fetch-User": "?1",
+    "Upgrade-Insecure-Requests": "1",
 }
 
 PRODUCT_NAMES = {
@@ -359,6 +369,13 @@ def main():
     changes = []
 
     session = requests.Session()
+
+    # Ініціалізація сесії на головній сторінці для отримання Cloudflare кук
+    try:
+        session.get("https://www.nkon.nl/ua/", headers=HEADERS, timeout=15)
+        time.sleep(1)
+    except Exception as e:
+        print(f"⚠️ Не вдалося ініціалізувати сесію на головній: {e}")
 
     for url in urls:
         try:
